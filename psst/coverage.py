@@ -12,6 +12,8 @@ import h3
 REMOTE_DIR = "/www/wwwroot/psst/public/coverage"
 
 COLORS = {"open": "#9e9e9e", "claimed": "#f2a900", "drafted": "#0067b1", "reviewed": "#7a1f5c", "done": "#00783a"}
+LABELS = {"open": "Not researched yet", "claimed": "Being researched now", "drafted": "Researched, waiting for review",
+          "reviewed": "Reviewed, waiting to be published", "done": "Finished and published"}
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -35,6 +37,7 @@ PAGE = """<!doctype html>
 <script>
 const data = __DATA__;
 const colors = __COLORS__;
+const labels = __LABELS__;
 const map = L.map("map", { preferCanvas: true });
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19, attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
@@ -43,9 +46,9 @@ const cellsLayer = L.geoJSON(data.cells, {
   style: f => ({ color: colors[f.properties.state], weight: 1, fillOpacity: f.properties.places ? 0.45 : 0.18 }),
   onEachFeature: (f, layer) => {
     const p = f.properties;
-    layer.bindPopup(`<b>${p.cell}</b><br>${p.city || ""}<br>State: ${p.state}<br>` +
-      `${p.places} places, ${p.published} published facts, ${p.pending} waiting` +
-      (p.notes ? `<br><i>${p.notes.replace(/</g, "&lt;")}</i>` : ""));
+    layer.bindPopup(`<b>${p.city || "Research cell"}</b><br>${labels[p.state]}<br>` +
+      `${p.places} places, ${p.published} stories in the app, ${p.pending} waiting for review` +
+      (p.notes ? `<br><i>${p.notes.replace(/</g, "&lt;")}</i>` : "") + `<br><small>Cell ${p.cell}</small>`);
   }
 }).addTo(map);
 // Heat: how often each empty area was looked at, on a log scale so one busy area doesn't wash out the rest.
@@ -63,14 +66,14 @@ L.control.layers(null, { "Research cells": cellsLayer, "Empty areas people looke
 const legend = L.control({ position: "bottomleft" });
 legend.onAdd = () => {
   const div = L.DomUtil.create("div", "panel");
-  div.innerHTML = `<h1>Psst coverage</h1><table>` +
+  div.innerHTML = `<h1>Psst coverage</h1><div style="margin-bottom:6px">Each hexagon is a research cell, about 2.5 km across.</div><table>` +
     Object.entries(data.totals).map(([state, n]) =>
-      `<tr><td><span class="swatch" style="background:${colors[state]}"></span>${state}</td><td>${n} cells</td></tr>`).join("") +
+      `<tr><td><span class="swatch" style="background:${colors[state]}"></span>${labels[state]}</td><td>${n}</td></tr>`).join("") +
     `</table>` +
     (data.demand.features.length ? `<div style="margin-top:6px">Empty areas people looked at: ` +
       heatColors.map(c => `<span class="swatch" style="background:${c};margin-right:1px"></span>`).join("") +
       ` up to ${maxViews} views</div>` : "") +
-    `<div style="margin-top:6px">${data.places} places, ${data.facts} published facts. Updated ${data.generatedAt}.</div>` +
+    `<div style="margin-top:6px">${data.places} places and ${data.facts} stories in the app. Updated ${data.generatedAt}.</div>` +
     `<div class="cities">` + data.cities.map((c, i) => `<a data-i="${i}">${c.name} (${c.cells})</a>`).join("") +
     (data.demand.features.length ? `<a data-demand="1">Most viewed empty areas</a>` : "") + `</div>`;
   div.querySelectorAll(".cities a[data-i]").forEach(a => a.onclick = () => show(data.cities[a.dataset.i]));
@@ -138,7 +141,7 @@ def build(conn) -> str:
         "totals": state_totals, "places": totals["places"], "facts": totals["facts"], "generatedAt": totals["at"],
     }
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    return PAGE.replace("__DATA__", payload).replace("__COLORS__", json.dumps(COLORS))
+    return PAGE.replace("__DATA__", payload).replace("__COLORS__", json.dumps(COLORS)).replace("__LABELS__", json.dumps(LABELS))
 
 
 def write(html: str, path: Path) -> Path:
