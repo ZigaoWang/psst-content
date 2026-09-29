@@ -48,6 +48,8 @@ const cellsLayer = L.geoJSON(data.cells, {
     const p = f.properties;
     layer.bindPopup(`<b>${p.city || "Research cell"}</b><br>${labels[p.state]}<br>` +
       `${p.places} places, ${p.published} stories in the app, ${p.pending} waiting for review` +
+      (p.leads ? `<br>${p.leads - p.open_leads} of ${p.leads} leads handled` : "") +
+      `<br>${p.passes} full research ${p.passes === 1 ? "pass" : "passes"}` +
       (p.notes ? `<br><i>${p.notes.replace(/</g, "&lt;")}</i>` : "") + `<br><small>Cell ${p.cell}</small>`);
   }
 }).addTo(map);
@@ -92,14 +94,16 @@ if (data.cities.length) show(data.cities[0]); else map.setView([30, 0], 2);
 
 def build(conn) -> str:
     rows = conn.execute("""
-        SELECT rc.cell, rc.state, rc.notes, ci.name AS city,
+        SELECT rc.cell, rc.state, rc.notes, ci.name AS city, rc.passes,
+               (SELECT count(*) FROM research_leads l WHERE l.cell = rc.cell) AS leads,
+               (SELECT count(*) FROM research_leads l WHERE l.cell = rc.cell AND l.status = 'open') AS open_leads,
                count(DISTINCT p.id) AS places,
                count(f.id) FILTER (WHERE f.state = 'published') AS published,
                count(f.id) FILTER (WHERE f.state IN ('draft', 'reviewed')) AS pending
         FROM research_cells rc LEFT JOIN admin_areas ci ON ci.id = rc.city_id
         LEFT JOIN places p ON p.h3_cell = rc.cell AND p.state = 'active'
         LEFT JOIN facts f ON f.place_id = p.id
-        GROUP BY rc.cell, rc.state, rc.notes, ci.name ORDER BY rc.cell""").fetchall()
+        GROUP BY rc.cell, rc.state, rc.notes, ci.name, rc.passes ORDER BY rc.cell""").fetchall()
     demand = conn.execute("""SELECT d.cell, sum(d.count) AS count FROM demand d WHERE d.day > current_date - 90
                              GROUP BY d.cell ORDER BY d.cell""").fetchall()
     planned = {}
@@ -129,7 +133,8 @@ def build(conn) -> str:
         c["south"], c["north"] = min(c["south"], *lats), max(c["north"], *lats)
         c["west"], c["east"] = min(c["west"], *lngs), max(c["east"], *lngs)
         features.append({"type": "Feature", "geometry": polygon(r["cell"]),
-                         "properties": {k: r[k] for k in ("cell", "state", "city", "places", "published", "pending", "notes")}})
+                         "properties": {k: r[k] for k in ("cell", "state", "city", "places", "published", "pending", "notes",
+                                                          "passes", "leads", "open_leads")}})
     data = {
         "cells": {"type": "FeatureCollection", "features": features},
         "demand": {"type": "FeatureCollection", "features": [
