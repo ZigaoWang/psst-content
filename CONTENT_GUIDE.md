@@ -86,31 +86,38 @@ uv run psst run finish $PSST_RUN
 
 ## 5. Researching a cell
 
-1. **Start a research run** (section 4).
-2. **Claim a cell.**
+1. **Make sure the city is set up.** `uv run psst city list` shows every city ready for research. If yours isn't there:
    ```
-   uv run psst research claim --city London        # the most wanted open cell in London
+   uv run psst city add "Hong Kong" --country HK
+   ```
+   It loads the country's boundaries on the server if they aren't there yet (a large country takes a few minutes), adds better district or neighborhood data where there is some, and plans the city's cells. If the name isn't found, it lists close matches.
+2. **Start a research run** (section 4).
+3. **Claim a cell.**
+   ```
+   uv run psst research claim --city London                   # the next cell in London
+   uv run psst research claim --city London --near 51.505,-0.023   # the open cell closest to a spot
    uv run psst research claim --cell 87194ac00ffffff
    ```
-   With no `--cell`, it picks an open cell in the area app users looked at most while it was empty, then the one next to the most finished cells, so coverage grows outward. `uv run psst research wanted` lists the most viewed empty areas, including ones with no cells planned yet; planning a new city is the owner's call. The claim lasts 12 hours. If you give up, `uv run psst research release <cell>`.
-3. **Read the brief** in `work/<cell>/brief.md` (and `brief.json`). It has the cell's bounds and neighborhoods, every place already in this cell and the six around it with their facts, and leads from Wikipedia (in English and the local language) and OpenStreetMap, each marked when it's already in Psst. A sweep is a long list of leads, not a list of places: most will be cut.
-4. **Add what the sweep can't see.** Heritage and plaque records (Historic England in the UK, the equivalent body elsewhere), local history societies, station and transit histories, pub histories, filming location databases, music history sites. Then sanity check against the obvious: if a visitor would expect a place here, it should be here, unless there's truly nothing surprising to say.
-5. **Check nothing is already in Psst.** `uv run psst places search "Cutty Sark"` finds places by name in any language, or by Wikidata id or OSM element. To add facts to an existing place, reference its id in the draft (section 11); never create it again.
-6. **Research and cut** (section 6), **write** (sections 7 and 8), **tag** (section 10), and save the draft as `work/<cell>/draft.json` (section 11).
-7. **Check the draft** until it has no errors, and read every warning:
+   With no `--cell` or `--near`, it picks an open cell in the area app users looked at most while it was empty, then cells that already show rich content (dense areas only partly covered), then cells next to finished ones. `uv run psst research wanted` lists the most viewed empty areas, including cities not set up yet. The claim lasts 12 hours. If you give up, `uv run psst research release <cell>`.
+4. **Read the brief** in `work/<cell>/brief.md` (and `brief.json`). It has the cell's bounds and neighborhoods, every place already in this cell and the six around it with their facts, and every lead from Wikipedia (in English and the local language) and OpenStreetMap. Leads marked TODO must be accounted for (next step); leads already in Psst or handled in an earlier pass are marked so.
+5. **Account for every lead.** Density is the point: a cell counts as researched only when every lead is added as a place, already in Psst, or in the draft's `skipped` list with a reason. `psst draft check` names any left over. Most leads will be skipped, and that's fine: one reason can cover many (`"names": ["25 Bank Street", "40 Bank Street"], "reason": "Office towers with nothing surprising in any source"`). A dense cell can have 200 leads; if you can't do them all well, add what you finish and put the rest in `skipped` with `"later": true`. The cell then stays open for the next pass, and nothing is lost.
+6. **Add what the sweep can't see.** Heritage and plaque records (Historic England in the UK, the equivalent body elsewhere), local history societies, station and transit histories, pub histories, filming location databases, music history sites. Then sanity check against the obvious: if a visitor would expect a place here, it should be here, unless there's truly nothing surprising to say.
+7. **Check nothing is already in Psst.** `uv run psst places search "Cutty Sark"` finds places by name in any language, or by Wikidata id or OSM element. To add facts to an existing place, reference its id in the draft (section 11); never create it again.
+8. **Research and cut** (section 6), **write** (sections 7 and 8), **tag** (section 10), and save the draft as `work/<cell>/draft.json` (section 11).
+9. **Check the draft** until it has no errors, and read every warning:
    ```
    uv run psst draft check work/<cell>/draft.json
    ```
-   It checks the format, every writing rule, sources, tag ids, duplicates of existing places (by Wikidata id, OSM element, and similar names within 150 meters), and looks up every coordinate.
-8. **Do your own review** before submitting. For every fact: does the source actually say this (open it)? Is the veracity honest? Would a friend say "wait, really?" Does the short version stand on its own? Does it sound like the fact before it?
-9. **Submit:**
+   It checks the format, every lead, every writing rule, sources, tag ids, duplicates of existing places (by Wikidata id, OSM element, and similar names within 150 meters), the local name's language, and every coordinate.
+10. **Do your own review** before submitting. For every fact: does the source actually say this (open it)? Is the veracity honest? Would a friend say "wait, really?" Does the short version stand on its own? Does it sound like the fact before it?
+11. **Submit:**
    ```
    uv run psst draft submit work/<cell>/draft.json
    ```
-   Everything is stored as drafts. New places get their coordinates, license, city, district, and neighborhood automatically, and names in other languages from Wikidata and OpenStreetMap. The cell moves to `drafted`.
-10. **Finish the run.**
+   Everything is stored as drafts. New places get their coordinates, license, city, district, and neighborhood automatically, and names in other languages from Wikidata and OpenStreetMap. The cell moves to `drafted` (or stays open, if leads were left for later).
+12. **Finish the run.**
 
-A cell can come out empty. Suburbs and parks sometimes have nothing that clears the bar. Submit a draft with no places and a `notes` line saying what you checked, so nobody repeats the work. The cell is marked done straight away.
+A cell can come out empty. Suburbs and parks sometimes have nothing that clears the bar. Submit a draft with no places, every lead in `skipped`, and a `notes` line saying what you checked, so nobody repeats the work. The cell is marked done straight away.
 
 `work/` is a scratch folder and is never committed.
 
@@ -143,8 +150,10 @@ Never write one entry for a whole district, neighborhood, estate, or street netw
 
 ### Targets per cell
 
-- Dense city centers: 15 to 40 places.
-- Residential neighborhoods and suburbs: 5 to 20.
+These are floors, not ceilings. The leads decide how dense a cell gets: everything with a real story goes in.
+
+- Dense city centers: 20 to 60 places, over several passes if needed.
+- Residential neighborhoods and suburbs: 5 to 25.
 - Countryside, parks, and quiet edges: as many as genuinely deserve it, including none.
 
 Each place has 1 to 4 facts. One excellent fact is enough for a place to exist. Quality always beats count.
@@ -157,7 +166,7 @@ Each place has 1 to 4 facts. One excellent fact is enough for a place to exist. 
 - Going there would send people somewhere they shouldn't be: private homes, restricted sites, dangerous places. Public exteriors of private buildings are fine.
 - It would point at a private living person who isn't a public figure, or at the home of a recent crime victim. Places tied to tragedies are fine when the story is historical and written with respect.
 
-List the good-looking leads you cut, with why, in the draft's `skipped` list. It saves the next researcher the same work.
+Every lead you cut goes in the draft's `skipped` list with why (section 5). It saves the next researcher the same work.
 
 ## 7. Writing facts
 
@@ -360,7 +369,9 @@ A draft is one JSON file for one cell. The schema is `format/draft.schema.json`;
     }
   ],
   "skipped": [
-    { "name": "Greenwich Market", "reason": "Everything interesting is already covered by the existing place." }
+    { "name": "Greenwich Market", "reason": "Everything interesting is already covered by the existing place." },
+    { "names": ["Greenwich (ward)", "Royal Borough of Greenwich"], "reason": "Areas, not places you can point at." },
+    { "names": ["Trafalgar Tavern", "Cutty Sark Gardens"], "reason": "Not reached in this pass.", "later": true }
   ]
 }
 ```
@@ -374,7 +385,7 @@ A draft is one JSON file for one cell. The schema is `format/draft.schema.json`;
 | `places[].name`, `localName`, `kind`, `size` | For a new place. See section 9. |
 | `places[].wikidata`, `osm` | For a new place: at least one. If you give both, they must be the same thing. |
 | `places[].facts` | 1 to 4 facts, best first. Each has `category`, `veracity`, `headline`, `short`, `long`, `sources` (each with `url`, `title`, `publisher`), and `tags` (tag ids; `[]` for none). |
-| `skipped` | Optional. Leads you looked at and left out, with `name`, `reason`, and optionally `wikidata` or `osm`. |
+| `skipped` | Every lead from the brief you didn't add: `name` (or `names`, a list, for several with one reason), `reason`, and optionally `wikidata` or `osm`. Add `"later": true` for leads not reached in this pass; the cell stays open for them. |
 
 Ids are assigned by the tools and never change. Nothing else exists in the format; unknown fields are rejected, so a typo can't slip through.
 
@@ -465,7 +476,7 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 - Everything is stored in WGS-84, like everywhere else. Apple Maps draws mainland China in GCJ-02 only when it's using its China map provider, which depends on where the device is. The app checks this at runtime and shifts pins only when needed.
 - Apple has no 3D buildings for Chinese cities, so the app shows these places from straight above. Nothing in the content needs to change for this.
 - Wikipedia, Wikimedia, and many Western sites are blocked in mainland China, and some Chinese government sites are hard to reach from outside it. Neither affects the app, which downloads content from the Psst server, but prefer sources a reader in either place can open.
-- District and neighborhood boundaries in Shanghai come from OpenStreetMap, where they're far more complete than Who's On First. For a new Chinese city, load its OSM boundaries first (the owner does this; see `docs/DESIGN.md`).
+- District and neighborhood boundaries in Chinese cities come from OpenStreetMap, where they're far more complete than Who's On First; `psst city add` loads them. Hong Kong uses its 18 districts and OpenStreetMap's named neighborhoods.
 
 ### Places with other languages and scripts
 
