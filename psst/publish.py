@@ -180,7 +180,7 @@ def bundle(base_url: str, app: Path) -> dict:
     target = app / "Content" / f"v{export.FORMAT_VERSION}"
     if target.exists():
         for old in target.rglob("*"):
-            if old.is_file():
+            if old.is_file() and old.name != ".gitkeep":
                 old.unlink()
     (target / "packs").mkdir(parents=True, exist_ok=True)
     root = f"{base_url}/content/production/v{export.FORMAT_VERSION}"
