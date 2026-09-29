@@ -29,6 +29,13 @@ def start(conn, kind, model):
     return runs.require(conn, run_id, kind)
 
 
+def read_sources(conn, run_id, fact_id):
+    """What `psst fetch <url> --run <id>` records for each of the fact's sources."""
+    conn.execute("""INSERT INTO source_reads (run_id, url_key, ok)
+                    SELECT %s, s.url_key, true FROM fact_sources fs JOIN sources s ON s.id = fs.source_id
+                    WHERE fs.fact_id = %s ON CONFLICT DO NOTHING""", (run_id, fact_id))
+
+
 def draft_for(cell, tag_id):
     return {"cell": cell, "notes": "Test draft.", "places": [{
         "name": "Test Bench", "kind": "memorial", "size": "small", "wikidata": "Q999999999",
@@ -109,6 +116,8 @@ def test_review_then_export(scratch, cell, tag_id, tmp_path):
                 "changes": {"headline": "The bench looks at a car park on purpose"}}
     assert any("own research" in e for e in review.check(scratch, [decision], researcher).errors)
     reviewer = start(scratch, "review", "test-reviewer")
+    assert any("open every source" in e for e in review.check(scratch, [decision], reviewer).errors)
+    read_sources(scratch, reviewer["id"], fact_id)
     assert review.check(scratch, [decision], reviewer).ok
     assert not review.check(scratch, [{**decision, "notes": "ok"}], reviewer).ok
     review.apply(scratch, [decision], reviewer)
@@ -144,6 +153,7 @@ def test_reports_flag_published_facts_for_review(scratch):
     queue = review.queue(scratch, 5)
     assert queue[0]["id"] == fact["id"] and queue[0]["reports"][0]["reason"] == "wrong"
     reviewer = start(scratch, "review", "test-reviewer")
+    read_sources(scratch, reviewer["id"], fact["id"])
     review.apply(scratch, [{"fact": fact["id"], "decision": "approve",
                             "notes": "Checked the date against two sources; it is right."}], reviewer)
     row = scratch.execute("SELECT state, needs_review, last_verified_at FROM facts WHERE id = %s", (fact["id"],)).fetchone()
@@ -195,6 +205,7 @@ def test_migrated_facts_can_be_verified(scratch):
                               JOIN admin_areas ci ON ci.id = p.city_id
                               WHERE f.state = 'published' AND f.last_verified_at IS NULL LIMIT 1""").fetchone()
     reviewer = start(scratch, "review", "any-model")
+    read_sources(scratch, reviewer["id"], fact["id"])
     assert fact["id"] in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=reviewer["id"], city=fact["city"],
                                                          verify=True)]
     decision = {"fact": fact["id"], "decision": "approve", "notes": "Opened both sources; every detail matches."}

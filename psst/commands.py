@@ -569,12 +569,20 @@ def sources_check(args) -> int:
 
 @command("fetch", "Read a web page as plain text, falling back to the Internet Archive when a site refuses.",
          arg("url"), arg("--max", type=int, default=20000, help="characters to show (default 20000)"),
-         arg("--archive", action="store_true", help="read the newest archived copy directly"))
+         arg("--archive", action="store_true", help="read the newest archived copy directly"),
+         arg("--run", default=os.environ.get("PSST_RUN"),
+             help="the run reading it; reviews must read every source this way before approving"))
 def fetch_command(args) -> int:
-    from . import fetch
+    from . import fetch, rules
     page = fetch.read(args.url, args.archive)
     print(fetch.render(page, args.max))
-    return 0 if page.text and not page.text.startswith("(Couldn't") else 1
+    ok = bool(page.text) and not page.text.startswith(("(Couldn't", "(The archived copy", "(This is a PDF"))
+    if args.run:
+        with db.connect() as conn:
+            conn.execute("""INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, %s)
+                            ON CONFLICT (run_id, url_key) DO UPDATE SET ok = source_reads.ok OR EXCLUDED.ok,
+                                read_at = now()""", (args.run, rules.normalize_url(args.url), ok))
+    return 0 if ok else 1
 
 
 # Review ------------------------------------------------------------------------------------------------

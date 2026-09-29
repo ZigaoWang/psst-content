@@ -77,6 +77,7 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
                 FROM fact_sources fs JOIN sources s ON s.id = fs.source_id WHERE fs.fact_id = f.id) AS source_list
         FROM facts f WHERE f.id = ANY(%s)""", (fact_ids,))}
     known_tags = {r["id"] for r in conn.execute("SELECT id FROM tags")}
+    read = {r["url_key"] for r in conn.execute("SELECT url_key FROM source_reads WHERE run_id = %s", (run["id"],))}
     seen = set()
     for index, decision in enumerate(decisions):
         where = f"decisions[{index}]"
@@ -118,6 +119,11 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
                       "short": fact["short"], "long": fact["long"], "sources": fact["source_list"]}
             merged.update({k: v for k, v in changes.items() if k != "tags"})
             rules.check_fact(report, where, merged)
+            unread = [s["url"] for s in merged["sources"] if isinstance(s, dict) and s.get("url")
+                      and rules.normalize_url(s["url"]) not in read]
+            if unread:
+                report.error(where, "open every source before approving, with `psst fetch <url> --run <run id>`; "
+                                    "not read in this run: " + ", ".join(unread))
             for tag_id in changes.get("tags", []):
                 if tag_id not in known_tags:
                     report.error(where, f"{tag_id} is not a tag")
