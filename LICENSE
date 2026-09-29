@@ -1,8 +1,10 @@
 Copyright (c) 2026 Zigao Wang. All rights reserved.
 
-The content in this repository (the area files, their text, and the research behind them) may not be
-copied, modified, or redistributed without permission. The tools in scripts/ are part of the same
-repository and covered by the same terms unless stated otherwise.
+The Psst content (the places, their stories, and the research behind them), including anything exported
+from the Psst database, may not be copied, modified, or redistributed without permission. The code in
+this repository is covered by the same terms unless stated otherwise.
 
-Coordinates are taken from Wikidata (CC0) and OpenStreetMap (© OpenStreetMap contributors, ODbL).
-Facts cite their sources; those sources remain the property of their owners.
+Coordinates and names that come from Wikidata are available under CC0 1.0. Coordinates and names that
+come from OpenStreetMap are © OpenStreetMap contributors and available under the Open Database License
+(ODbL) 1.0: https://www.openstreetmap.org/copyright. Boundaries from Who's On First are available under
+their own licenses: https://whosonfirst.org/docs/licenses/.
