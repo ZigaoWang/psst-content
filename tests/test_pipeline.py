@@ -162,3 +162,14 @@ def test_edits_and_flags_are_kept_in_history(scratch):
                              (fact,)).fetchall()
     assert events[0]["changes"] == ["headline", "unflagged"] and events[0]["to_state"] == "published"
     assert events[1]["changes"] == ["flagged"]
+
+
+def test_an_empty_cell_is_finished_at_once(scratch, cell):
+    researcher = start(scratch, "research", "test-researcher")
+    research.claim(scratch, researcher["id"], cell=cell)
+    draft = {"cell": cell, "notes": "Only houses and a car park; nothing held up.", "places": []}
+    checked = research.check(scratch, draft, online=False)
+    assert checked.report.ok
+    research.submit(scratch, draft, researcher, checked)
+    row = scratch.execute("SELECT state, notes FROM research_cells WHERE cell = %s", (cell,)).fetchone()
+    assert row["state"] == "done" and "car park" in row["notes"]

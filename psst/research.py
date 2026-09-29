@@ -414,8 +414,10 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
     notes = draft.get("notes", "")
     if draft.get("skipped"):
         notes += ("\n" if notes else "") + "Skipped: " + "; ".join(f"{s['name']} ({s['reason']})" for s in draft["skipped"])
-    conn.execute("""UPDATE research_cells SET state = 'drafted', claimed_by_run = NULL, claimed_until = NULL,
-                    last_researched_at = now(), notes = nullif(%s, '') WHERE cell = %s""", (notes, draft["cell"]))
+    # A cell with nothing worth adding is finished; otherwise it waits for review.
+    conn.execute("""UPDATE research_cells SET state = %s, claimed_by_run = NULL, claimed_until = NULL,
+                    last_researched_at = now(), notes = nullif(%s, '') WHERE cell = %s""",
+                 ("drafted" if counts["facts"] else "done", notes, draft["cell"]))
     counts["new_place_ids"] = new_place_ids
     return counts
 
