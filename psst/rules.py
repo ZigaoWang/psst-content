@@ -189,8 +189,8 @@ def normalize_url(url: str) -> str:
     host = parsed.netloc.lower()
     if host.startswith("www."):
         host = host[4:]
-    if host.startswith("m.") and host.endswith("wikipedia.org"):
-        host = host[2:]
+    if host.endswith("wikipedia.org"):
+        host = host.replace(".m.wikipedia.org", ".wikipedia.org")
     path = parsed.path.rstrip("/") or "/"
     query = urllib.parse.urlencode(sorted(
         (k, v) for k, v in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
