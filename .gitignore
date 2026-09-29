@@ -4,3 +4,8 @@ __pycache__/
 /candidates/
 /tmp/
 /plans/
+/.venv/
+/work/
+/export/
+*.egg-info/
+.pytest_cache/
