@@ -27,17 +27,20 @@ translations the app makes all stay on your device. If you let Psst use your loc
 device to show places near you and is never sent anywhere.</p>
 
 <h2>What the app sends</h2>
-<p><strong>Downloading stories.</strong> The app downloads place and story files from our server. Like
-any website, the server's access logs record your IP address and the files requested. These logs are kept
-for 14 days for security and then deleted.</p>
+<p><strong>Downloading stories.</strong> The app downloads place and story files from our server. The
+server doesn't record your IP address: its logs keep only the time, the file requested, and whether it
+worked, for 14 days. To stop abuse, the server counts requests from each address over the last minute. That
+count is kept in memory only, never written down, and forgotten within minutes.</p>
 <p><strong>Coverage requests.</strong> When you look at a city-sized part of the map where Psst has no
-stories yet, the app sends the middle of that map area, rounded to about 10 kilometers. It isn't your
-location, and nothing else is sent: no identifier. We turn it into a hexagon of about 250 square
-kilometers and keep only a daily count for each hexagon, to decide where to research next. You can turn
-this off in Settings, under "Help choose new areas".</p>
+stories yet, the app sends which area it was: the ID of a hexagon of about 250 square kilometers around the
+middle of the view. That's all it sends: no coordinates, no identifier, no account. It never sends where you
+are: while your own location is inside the map view, nothing is sent. Each phone sends a given hexagon at
+most once a day, and at most 10 a day. We keep only a daily count for each hexagon, to decide where to
+research next. You can turn this off in Settings, under "Help choose new areas".</p>
 <p><strong>Problem reports.</strong> If you report a problem with a story, we receive which story it was,
-the reason you picked, anything you chose to type, and the app version. Reports aren't linked to you.
-Please don't include personal information in the message.</p>
+the reason you picked, anything you chose to type, and the app version. Reports aren't linked to you. Each
+phone can report a story once, and send up to 5 reports a day. Please don't include personal information in
+the message.</p>
 
 <h2>Other services</h2>
 <p>Maps and street-level imagery come from Apple Maps, and translation uses Apple's on-device Translation
