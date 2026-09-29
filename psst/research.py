@@ -503,7 +503,8 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
                                     osm_ref, h3_cell, created_by_run)
                 VALUES (%s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s, %s, %s, %s, %s, %s)""",
                          (place_id, entry["kind"], entry.get("size", "medium"), pos.lon, pos.lat, pos.source, pos.ref,
-                          pos.license, entry.get("wikidata"), entry.get("osm"), cells.cell_for(pos.lat, pos.lon),
+                          pos.license, entry.get("wikidata"), entry.get("osm") or (pos.ref if pos.source == "osm" else None),
+                          cells.cell_for(pos.lat, pos.lon),
                           run["id"]))
             conn.execute("INSERT INTO place_names (place_id, role, lang, name, source) VALUES (%s, 'display', 'en', %s, 'research')",
                          (place_id, entry["name"]))

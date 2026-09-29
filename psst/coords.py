@@ -85,6 +85,24 @@ def osm(refs: list[str]) -> dict[str, tuple[float, float]]:
     return found
 
 
+def osm_by_wikidata(qids: list[str]) -> dict[str, list[tuple[str, float, float]]]:
+    """OpenStreetMap elements tagged with each Wikidata item: {qid: [(ref, lat, lon), ...]}."""
+    found: dict[str, list[tuple[str, float, float]]] = {}
+    for start in range(0, len(qids), 50):
+        batch = qids[start:start + 50]
+        pattern = "|".join(batch)
+        try:
+            payload = net.overpass(f'[out:json][timeout:90];nwr["wikidata"~"^({pattern})$"];out center;')
+        except RuntimeError:
+            continue
+        for element in payload.get("elements", []):
+            qid = element.get("tags", {}).get("wikidata")
+            point = element if "lat" in element else element.get("center")
+            if qid in batch and point:
+                found.setdefault(qid, []).append((f"{element['type']}/{element['id']}", point["lat"], point["lon"]))
+    return found
+
+
 def _osm_api_center(ref: str) -> tuple[float, float] | None:
     kind, number = ref.split("/")
     suffix = ".json" if kind == "node" else "/full.json"
@@ -111,6 +129,12 @@ def resolve(entries: list[dict], report: rules.Report) -> dict[int, Position]:
     refs = sorted({e["osm"] for e in entries if e.get("osm")})
     from_wikidata = wikidata(qids) if qids else {}
     from_osm = osm(refs) if refs else {}
+    # Items whose Wikidata coordinate can't be used and that came without an OSM element: look for the
+    # element tagged with the item, so nobody has to hunt for it by hand.
+    unusable = [e["wikidata"] for e in entries if e.get("wikidata") and not e.get("osm")
+                and (len(from_wikidata.get(e["wikidata"]) or []) != 1
+                     or (from_wikidata[e["wikidata"]][0][2] or 0) > MAX_WIKIDATA_PRECISION)]
+    tagged = osm_by_wikidata(sorted(set(unusable))) if unusable else {}
     positions: dict[int, Position] = {}
     for index, entry in enumerate(entries):
         where = f"places[{index}] ({entry.get('name', '?')})"
@@ -137,6 +161,14 @@ def resolve(entries: list[dict], report: rules.Report) -> dict[int, Position]:
                 positions[index] = Position(coord[0], coord[1], "osm", ref)
                 continue
             report.error(where, f"{ref} was not found on OpenStreetMap" + (f"; also {reason}" if reason else ""))
+        elif len(tagged.get(qid, [])) == 1:
+            ref, lat, lon = tagged[qid][0]
+            positions[index] = Position(lat, lon, "osm", ref)
+            report.warn(where, f"{reason}, so the OpenStreetMap element tagged with it ({ref}) was used")
+        elif tagged.get(qid):
+            options = ", ".join(r for r, _, _ in tagged[qid][:6])
+            report.error(where, f"{reason}; several OpenStreetMap elements carry {qid} ({options}): "
+                                "add the right one as 'osm'")
         else:
             report.error(where, f"{reason}; add the OpenStreetMap element as 'osm'")
     return positions
