@@ -55,7 +55,7 @@ The jobs:
 - **Reviewer:** a different run, skeptical by default, that approves, edits, or rejects each draft fact and handles problem reports (section 12).
 - **Publisher:** runs `psst publish`, which stages everything, checks it, and only then goes live (section 13).
 
-Use a different session for review than for research. If you can, use a different model too.
+Review always happens in a different session, with a different model from the one that wrote the fact. The tools enforce the model rule: `review next` never hands a model its own writing, and `review apply` refuses it.
 
 ## 3. Setup
 
@@ -92,7 +92,7 @@ uv run psst run finish $PSST_RUN
    uv run psst research claim --city London        # the most wanted open cell in London
    uv run psst research claim --cell 87194ac00ffffff
    ```
-   With no `--cell`, it picks the open cell app users asked about most, then the one next to the most finished cells, so coverage grows outward. The claim lasts 12 hours. If you give up, `uv run psst research release <cell>`.
+   With no `--cell`, it picks an open cell in the area app users looked at most while it was empty, then the one next to the most finished cells, so coverage grows outward. `uv run psst research wanted` lists the most viewed empty areas, including ones with no cells planned yet; planning a new city is the owner's call. The claim lasts 12 hours. If you give up, `uv run psst research release <cell>`.
 3. **Read the brief** in `work/<cell>/brief.md` (and `brief.json`). It has the cell's bounds and neighborhoods, every place already in this cell and the six around it with their facts, and leads from Wikipedia (in English and the local language) and OpenStreetMap, each marked when it's already in Psst. A sweep is a long list of leads, not a list of places: most will be cut.
 4. **Add what the sweep can't see.** Heritage and plaque records (Historic England in the UK, the equivalent body elsewhere), local history societies, station and transit histories, pub histories, filming location databases, music history sites. Then sanity check against the obvious: if a visitor would expect a place here, it should be here, unless there's truly nothing surprising to say.
 5. **Check nothing is already in Psst.** `uv run psst places search "Cutty Sark"` finds places by name in any language, or by Wikidata id or OSM element. To add facts to an existing place, reference its id in the draft (section 11); never create it again.
@@ -382,8 +382,8 @@ Ids are assigned by the tools and never change. Nothing else exists in the forma
 
 Review is where Psst stays trustworthy. Assume every draft has a mistake in it until you've failed to find one.
 
-1. Start a review run: `export PSST_RUN=$(uv run psst run start --kind review --model <model>)`. A run can never review its own research.
-2. Get a batch: `uv run psst review next --out work/review.json` (add `--cell <cell>` for one cell, `--limit` for more than 25). Reported facts come first, then drafts. Each item has the fact, its place and pin, its sources and tags, the place's other facts, and any open problem reports.
+1. Start a review run with your model id: `export PSST_RUN=$(uv run psst run start --kind review --model <model>)`. A run can never review its own research, and a model can never review what it wrote.
+2. Get a batch: `uv run psst review next --out work/review.json` (add `--cell <cell>` or `--city <city>` to narrow it, `--limit` for more than 25). Reported and flagged facts come first, then drafts. Each item has the fact, its place and pin, its sources (with the result of the last link check) and tags, the place's other facts, any open problem reports, and `flagged_because` when a report, a person, or the link check flagged it.
 3. For every fact, check:
    - **The source says it.** Open every source. Check each number, name, and date against it. A claim the sources don't make is a rejection, or an edit that removes it.
    - **The veracity is honest.** One source, or sources repeating each other, means `legend` at most. Would a skeptical historian sign off on `fact`?
@@ -392,6 +392,7 @@ Review is where Psst stays trustworthy. Assume every draft has a mistake in it u
    - **The writing** follows section 7: the short version stands alone, nothing machine-sounding, no repeats of the place's other facts.
    - **The tags** fit and aren't padded.
    - **Reports:** read what the reader said and check it properly. They're often right.
+   - **Dead sources:** when the link check flagged a fact, find the page on `web.archive.org` (an archived copy is a fine source) or a better source that says the same thing, and edit `sources`. If nothing else supports the claim, reject the fact or cut the claim.
 4. Write your decisions to a file, one per fact:
    ```json
    [
@@ -416,6 +417,17 @@ Review is where Psst stays trustworthy. Assume every draft has a mistake in it u
 
 `uv run psst reports list` shows open problem reports from the app. They're also in `review next`.
 
+### Verifying migrated facts
+
+The 2,365 facts migrated from the old area files were checked by the old validator (format and writing rules), never by a skeptical review. They stay published while they're verified, city by city:
+
+```
+uv run psst review progress                                            # what's verified, per city and writer
+uv run psst review next --verify --city "Kuala Lumpur" --out work/review.json
+```
+
+`--verify` picks published facts nobody has checked since the migration, never ones written by your own model. Review them exactly as above. Approving marks a fact verified; an edit changes it at the next publish; a rejection takes it down at the next publish. Publish after each batch of decisions.
+
 ## 13. Publishing
 
 ```
@@ -436,11 +448,12 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 - `--no-new-facts`: re-export what's already published, for example to publish a tag merge.
 - `uv run psst rollback` points production back at the previous version (or `--to <version>`); `uv run psst prune` deletes pack files no recent version needs.
 - `uv run psst bundle` copies what production serves into the app repository (`../psst-map/Content/v2`) as the snapshot the app ships with. Do it before an app release, then rebuild the app.
-- `uv run psst coverage` rebuilds the coverage map at `/coverage/` on the Psst site (user `psst`; the password is in `/www/wwwroot/psst/coverage.password` on the server). It shows every cell by state, with place and fact counts, and where app users asked for places.
+- `uv run psst coverage` rebuilds the coverage map at `/coverage/` on the Psst site (user `psst`; the password is in `/www/wwwroot/psst/coverage.password` on the server). It shows every cell by state, with place and fact counts, and a heat layer of the empty areas app users looked at most.
 
 ## 14. Fixing published content
 
 - **Something is wrong in a published fact:** `uv run psst review flag <fact id> --reason "..."`. It stays live until a review run approves, edits, or rejects it (section 12). Readers' problem reports from the app do the same automatically.
+- **Dead links:** every Saturday the server checks every cited link (`psst sources check`). A source that fails two weeks in a row flags its facts for review. Sites that refuse scripts are recorded as blocked and never flag anything.
 - **Adding to a place:** research its cell again (`psst research claim --cell <cell>` works on finished cells too) and reference the place by id in the draft.
 - **A place is gone or nothing about it holds up:** reject all its facts in review. A place with no published facts disappears from the app, but its id is never reused, so saved places don't break.
 - **Never edit the database by hand.** Every change goes through a command, so it's attributed to a run and kept in the history.
