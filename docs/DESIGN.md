@@ -34,8 +34,8 @@ All tables live in the `psst` schema. The SQL is in `db/migrations/`, applied in
 
 - `id` is permanent and global: `pl_` plus 10 characters of Crockford base32 (`pl_7g2k9x4m1q`). Random for new places. For migrated places it's derived from the old `areaId/spotId`, so re-running the migration always produces the same ids.
 - `legacy_place_ids` maps every old `areaId/spotId` to its new id. It ships to the app, which rewrites saved places and feed history once on first launch. Nothing a person saved is lost.
-- The coordinate is a WGS-84 `geography(Point)`, with `coord_source` (`wikidata` or `osm`), `coord_source_ref` (`Q123`, `way/456`), and `coord_license` (`CC0-1.0` for Wikidata, `ODbL-1.0` for OpenStreetMap). Wikidata is preferred when both exist, as before. The app shows "© OpenStreetMap contributors" on every place located from OSM, and in About.
-- `wikidata_id` and `osm_ref` are stored whenever they exist, even when the coordinate came from the other source, and each is unique across all places. That is the primary duplicate check. A second check flags any draft within 25 meters of an existing place whose name is similar (trigram similarity 0.5 or higher).
+- The coordinate is a WGS-84 point (`geometry(Point, 4326)`), with `coord_source` (`wikidata` or `osm`), `coord_source_ref` (`Q123`, `way/456`), and `coord_license` (`CC0-1.0` for Wikidata, `ODbL-1.0` for OpenStreetMap). Wikidata is preferred when both exist, as before. The app shows "© OpenStreetMap contributors" on every place located from OSM, and in Settings.
+- `wikidata_id` and `osm_ref` are stored whenever they exist, even when the coordinate came from the other source, and each is unique across all places. That is the primary duplicate check. A second check rejects a new place within 150 meters of an existing place with a similar name (trigram similarity above 0.4).
 - `kind` and `size` are unchanged from the file format.
 - `h3_cell` (resolution 7) is the research cell. The hierarchy columns are filled in automatically (see below).
 
@@ -56,17 +56,17 @@ All tables live in the `psst` schema. The SQL is in `db/migrations/`, applied in
   - `published_at`
   - `last_verified_at`
   - `retired_at` and `retire_reason`
-- `fact_events` records every state change with who made it and why, so history is never overwritten.
+- `fact_events` records every state change, edit (with the fields changed), and review flag, with who made it, in which run, and why. A trigger writes it, so nothing can skip it.
 
 `sources` stores each URL once: normalized `url`, `title`, `publisher`, `language`, `archived_url`, and the result of the last link check. `fact_sources` links facts to sources in order.
 
 ### Tags
 
 - `tags` has a permanent `id` (`tg_` plus 8 characters), one `canonical_name`, a `type` (`person_or_group`, `event`, `era`, `theme`, `movement`), and an optional unique `wikidata_id`.
-- `tag_names` holds names in other languages, from Wikidata labels. `tag_aliases` holds the other ways people write it.
+- `tag_names` holds names in other languages, from Wikidata labels. `tag_labels` holds the canonical name and every other way people write it.
 - Every canonical name and alias is also stored normalized: lowercase, accents removed, a leading "the" dropped, punctuation and spacing collapsed. The normalized form is unique across all tags and aliases, so "Beatles" and "The Beatles" can't both exist.
 - `fact_tags` links facts to tag ids. Text is never stored on facts.
-- New tags only come through `psst tags propose`. It first looks for the same Wikidata id, then the same normalized name or alias, then anything with trigram similarity 0.55 or higher. It returns the existing tag when any of those match, and only creates a new one when none do. Research agents can only use ids that exist.
+- New tags only come through `psst tags propose`. It first looks for the same Wikidata id, then the same normalized name or alias, then anything with trigram similarity 0.55 or higher. An exact match returns the existing tag. A similar one blocks the proposal and lists the candidates, unless the proposer marks each as a different thing with `--distinct-from`. Drafts can only use tag ids that exist.
 - A tag is exported to the app only once it has published facts on at least 3 places.
 
 ### Location hierarchy
@@ -104,7 +104,7 @@ The Postgres H3 extension isn't packaged for this server, so cells are computed 
 
 Research agents never write SQL. They work through the CLI:
 
-1. `psst research claim` picks the next open cell, in priority order (demand, then neighbors of done cells, then everything else), marks it claimed, and writes a brief to `work/<cell>/`. The brief holds the cell's bounds, existing places, sweep candidates from OpenStreetMap and Wikipedia, and the tag vocabulary.
+1. `psst research claim` picks the next open cell, in priority order (demand, then neighbors of done cells, then everything else), marks it claimed, and writes a brief to `work/<cell>/`. The brief holds the cell's bounds and neighborhoods, the places already in it and around it, and leads from OpenStreetMap and Wikipedia marked when they're already in Psst. Tags are looked up with `psst tags search`.
 2. The agent researches and writes `work/<cell>/draft.json` (`format/draft.schema.json`, explained in CONTENT_GUIDE.md). New places carry their Wikidata or OSM reference; additions to existing places carry the place id.
 3. `psst draft check` validates everything a script can check (the old validator's rules, plus duplicates against the database and tag ids against the vocabulary). `psst draft submit` stores the drafts with provenance. The pipeline can only ever create `draft` facts.
 4. `psst review next` hands a different run the reported facts, then the drafts. It checks sources and veracity skeptically and writes a decision for each fact: approve, edit (which covers relabeling as legend or disputed), or reject, always with notes on what was checked. `psst review apply` checks every decision against the writing rules and records them all or none. Approved facts become `reviewed`; rejected ones are retired with the reason.
@@ -169,18 +169,16 @@ The text export keeps only the boundaries places and research cells use, with th
 
 `docs/RESTORE.md` explains both restores step by step, and both were tested. `psst backup test` restores the latest GitHub export into a scratch database with every foreign key checked, exports it again, and compares every table byte for byte. It runs every Sunday from cron.
 
-## Migration plan
+## Migration (done)
 
-1. Create the database, role, schema, and extensions. Load Who's On First for GB, MY, and CN.
-2. `psst import legacy areas/` reads every area file, including those written by the London researchers.
-   - Each spot becomes a place with its derived id and a legacy id row. Its facts become published facts with provenance: the area's `researchedOn`, the model that wrote them (`claude-opus-5-5` for the first 11 areas, `claude-sonnet-5-5` for the London seeding), a `legacy-import` pipeline run, and `reviewed_by = legacy-validator`.
-   - Sources are deduplicated by normalized URL.
-   - Spots that turn out to be the same thing across area files (same Wikidata id or OSM reference) are merged, and both legacy ids point at the one place.
-3. Fetch multilingual names from Wikidata and OSM, assign the hierarchy and cells, and tag every fact.
-   - A tagging pass reads each place's facts and chooses tags through `psst tags propose`, which enforces the vocabulary rules above.
-4. Tests prove nothing was lost or changed. Every legacy spot resolves to a place, every legacy fact is present with byte-identical text, and every source URL and every link between facts and sources survives. The exported packs round-trip to the same content.
-5. Publish to staging, check, promote, bundle into the app, and ship the app with the legacy id map.
-6. Remove `areas/`, the old scripts, and the area-based guide once the tests pass on the final import, after the running researchers finish.
+1. The database, roles, schema, and extensions were created (`server/database.sh`), and Who's On First was loaded for GB, MY, and CN, plus OpenStreetMap boundaries for Shanghai.
+2. `psst import legacy` read all 47 area files, including the London seeding output.
+   - Each spot became a place with an id derived from its old `areaId/spotId`, plus a legacy id row. Its facts became published facts with provenance: the date from git history, the model that wrote them (`claude-opus-5-5` before the London seeding began, `claude-sonnet-5-5` after), a `legacy-import` run, and `reviewed_by = legacy-validator`.
+   - Sources were deduplicated by normalized URL. No two spots turned out to be the same place.
+3. Multilingual names were fetched from Wikidata and OSM, every place got its city and neighborhood, and every fact was read by a tagging pass (four parallel runs, then one cleanup run for merges and renames).
+4. `tests/test_migration.py` proves nothing was lost or changed. It compares the database and what production serves against the area files at the `legacy-areas` git tag: every place, coordinate, fact text, source link, and old id.
+5. The result was published through staging and bundled into the app, which rewrites old saved place ids on first launch.
+6. `areas/` and the old scripts were removed. They remain in git history at `legacy-areas`.
 
 ## Why this, and not something else
 
