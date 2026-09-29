@@ -12,7 +12,7 @@ import zlib
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
 from . import net
@@ -28,6 +28,7 @@ class Page:
     text: str
     via_archive: bool = False
     archived_at: str | None = None
+    links: list[tuple[str, str]] = field(default_factory=list)  # (text, absolute URL), in page order
 
 
 class _Text(HTMLParser):
@@ -41,8 +42,14 @@ class _Text(HTMLParser):
         self.title = ""
         self._skip = 0
         self._in_title = False
+        self.links: list[tuple[str, str]] = []
+        self._href: str | None = None
+        self._link_text: list[str] = []
 
     def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self._href = dict(attrs).get("href")
+            self._link_text = []
         if tag in self.SKIP:
             self._skip += 1
         elif tag == "title":
@@ -51,6 +58,9 @@ class _Text(HTMLParser):
             self.parts.append("\n")
 
     def handle_endtag(self, tag):
+        if tag == "a" and self._href:
+            self.links.append((re.sub(r"\s+", " ", "".join(self._link_text)).strip(), self._href))
+            self._href = None
         if tag in self.SKIP and self._skip:
             self._skip -= 1
         elif tag == "title":
@@ -59,6 +69,8 @@ class _Text(HTMLParser):
             self.parts.append("\n")
 
     def handle_data(self, data):
+        if self._href is not None:
+            self._link_text.append(data)
         if self._in_title:
             self.title += data
         elif not self._skip:
@@ -120,7 +132,13 @@ def _page(url: str, status: int, content_type: str, body: bytes, **extra) -> Pag
         return Page(url, status, "", decoded, **extra)
     parser = _Text()
     parser.feed(decoded)
-    return Page(url, status, html.unescape(parser.title).strip(), parser.text(), **extra)
+    links, seen = [], set()
+    for text, href in parser.links:
+        absolute = urllib.parse.urljoin(url, href)
+        if absolute.startswith("http") and absolute not in seen:
+            seen.add(absolute)
+            links.append((text, absolute))
+    return Page(url, status, html.unescape(parser.title).strip(), parser.text(), links=links, **extra)
 
 
 def read(url: str, archive: bool = False) -> Page:
@@ -145,11 +163,14 @@ def read(url: str, archive: bool = False) -> Page:
                  archived_at=f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}")
 
 
-def render(page: Page, limit: int) -> str:
+def render(page: Page, limit: int, links: bool = False) -> str:
     head = [f"URL: {page.url}"]
     if page.via_archive:
         head.append(f"Read from the Internet Archive copy of {page.archived_at}; the live page refused or failed.")
     if page.title:
         head.append(f"Title: {page.title}")
     text = page.text if len(page.text) <= limit else page.text[:limit] + f"\n\n[... {len(page.text) - limit} more characters; use --max]"
-    return "\n".join(head) + "\n\n" + text
+    out = "\n".join(head) + "\n\n" + text
+    if links and page.links:
+        out += "\n\nLinks:\n" + "\n".join(f"- {t or '(no text)'}: {u}" for t, u in page.links)
+    return out

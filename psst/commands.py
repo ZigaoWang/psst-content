@@ -570,12 +570,13 @@ def sources_check(args) -> int:
 @command("fetch", "Read a web page as plain text, falling back to the Internet Archive when a site refuses.",
          arg("url"), arg("--max", type=int, default=20000, help="characters to show (default 20000)"),
          arg("--archive", action="store_true", help="read the newest archived copy directly"),
+         arg("--links", action="store_true", help="also list every link on the page (a Wikipedia article's sources, say)"),
          arg("--run", default=os.environ.get("PSST_RUN"),
              help="the run reading it; reviews must read every source this way before approving"))
 def fetch_command(args) -> int:
     from . import fetch, rules
     page = fetch.read(args.url, args.archive)
-    print(fetch.render(page, args.max))
+    print(fetch.render(page, args.max, args.links))
     ok = bool(page.text) and not page.text.startswith(("(Couldn't", "(The archived copy", "(This is a PDF"))
     if args.run:
         with db.connect() as conn:
