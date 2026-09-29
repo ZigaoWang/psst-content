@@ -34,3 +34,21 @@ def hierarchy_assign(args) -> int:
         print(f"  {row['city']}: {row['places']} places, {row['with_district']} with a district, "
               f"{row['with_neighborhood']} with a neighborhood")
     return 0
+
+
+@command("names fetch", "Fetch multilingual names from Wikidata and OpenStreetMap for every place.",
+         arg("--missing-only", action="store_true", help="only places with no alt names yet"))
+def names_fetch(args) -> int:
+    from . import names
+    with db.connect(actor="names") as conn:
+        places = conn.execute("""
+            SELECT p.id, p.country_code AS country, p.wikidata_id, p.osm_ref,
+                   (SELECT name FROM place_names WHERE place_id = p.id AND role = 'display') AS display,
+                   (SELECT name FROM place_names WHERE place_id = p.id AND role = 'local') AS local
+            FROM places p WHERE p.state = 'active'
+              AND (NOT %s OR NOT EXISTS (SELECT 1 FROM place_names WHERE place_id = p.id AND role = 'alt'))
+        """, (args.missing_only,)).fetchall()
+        result = names.apply(conn, places)
+    print(f"Stored {result['names']} names for {len(places)} places; "
+          f"recorded {result['wikidata_ids']} Wikidata ids found through OpenStreetMap.")
+    return 0
