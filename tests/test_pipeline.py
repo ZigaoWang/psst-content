@@ -150,3 +150,15 @@ def test_reports_flag_published_facts_for_review(scratch):
     assert row["state"] == "published" and not row["needs_review"] and row["last_verified_at"]
     assert scratch.execute("SELECT state FROM reports WHERE fact_id = %s ORDER BY id DESC LIMIT 1",
                            (fact["id"],)).fetchone()["state"] == "resolved"
+
+
+def test_edits_and_flags_are_kept_in_history(scratch):
+    fact = scratch.execute("SELECT id FROM facts WHERE state = 'published' LIMIT 1").fetchone()["id"]
+    scratch.execute("UPDATE facts SET needs_review = true WHERE id = %s", (fact,))
+    reviewer = start(scratch, "review", "test-reviewer")
+    review.apply(scratch, [{"fact": fact, "decision": "edit", "notes": "Tightened the headline after checking it.",
+                            "changes": {"headline": "A test headline that is short"}}], reviewer)
+    events = scratch.execute("SELECT to_state, changes FROM fact_events WHERE fact_id = %s ORDER BY id DESC LIMIT 2",
+                             (fact,)).fetchall()
+    assert events[0]["changes"] == ["headline", "unflagged"] and events[0]["to_state"] == "published"
+    assert events[1]["changes"] == ["flagged"]
