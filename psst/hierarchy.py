@@ -38,7 +38,15 @@ NEAREST_NEIGHBORHOOD_METERS = 1500
 # instead. China: WOF has few district boundaries and romanized neighborhood names, while OSM maps every
 # district (admin level 6) and subdistrict (街道, level 8) with English names.
 OSM_LEVELS = {"CN": {6: "district", 8: "neighborhood"}}
-PREFERRED_SOURCE = {"CN": {"district": "osm", "neighborhood": "osm"}}
+# Where OpenStreetMap has neighborhoods only as named points (place=suburb, quarter, neighbourhood), and
+# they're better than Who's On First's. Places get the nearest one, like any point neighborhood.
+OSM_NEIGHBORHOOD_POINTS = {"HK"}
+PREFERRED_SOURCE = {"CN": {"district": "osm", "neighborhood": "osm"}, "HK": {"neighborhood": "osm"}}
+# Who's On First placetypes that mean something else in a particular country. In Hong Kong, "region" is
+# one of the 18 districts people use, and localities are towns and neighborhoods inside the one city.
+LEVEL_OVERRIDES = {"HK": {"region": "district", "locality_point": None}}
+# OSM node ids and relation ids overlap, so points are stored below this offset.
+OSM_NODE_OFFSET = 10**13
 
 # Known errors in the boundary data, never used for assignment. Each needs a reason.
 EXCLUDED_AREAS = {
@@ -70,7 +78,15 @@ def read_wof(path: Path, country: str):
         WHERE s.placetype IN ({placetypes}) AND s.is_deprecated = 0 AND s.is_current != 0
           AND s.is_superseded = 0 AND s.country = ?
           AND json_extract(g.body, '$.geometry.type') IS NOT NULL""", (country,))
+    overrides = LEVEL_OVERRIDES.get(country, {})
     for area_id, placetype, name, parent_id, geometry in rows:
+        level = LEVELS[placetype]
+        if placetype in overrides:
+            level = overrides[placetype]
+        if placetype == "locality" and "locality_point" in overrides and json.loads(geometry).get("type") == "Point":
+            if overrides["locality_point"] is None:
+                continue
+            level = overrides["locality_point"]
         concordance = db.execute("SELECT other_id FROM concordances WHERE id = ? AND other_source = 'wd:id'",
                                  (area_id,)).fetchone()
         names: dict[str, str] = {}
@@ -81,7 +97,7 @@ def read_wof(path: Path, country: str):
             if tag and tag not in names:
                 names[tag] = name_text
         qid = concordance[0] if concordance and str(concordance[0]).startswith("Q") else None
-        yield area_id, placetype, LEVELS[placetype], names.get("en") or name, parent_id, geometry, names, qid
+        yield area_id, placetype, level, names.get("en") or name, parent_id, geometry, names, qid
     db.close()
 
 
@@ -129,6 +145,15 @@ def load_wof(conn, path: Path, country: str) -> int:
             ON CONFLICT (id) DO UPDATE SET placetype = EXCLUDED.placetype, level = EXCLUDED.level,
                 name = EXCLUDED.name, parent_id = EXCLUDED.parent_id, geom = EXCLUDED.geom,
                 wikidata_id = EXCLUDED.wikidata_id""", {"country": country})
+        cur.execute("""
+            WITH stale AS (
+                SELECT a.id FROM admin_areas a
+                WHERE a.country_code = %(country)s AND a.source = 'wof' AND a.id NOT IN (SELECT id FROM s_wof)
+                  AND NOT EXISTS (SELECT 1 FROM places p WHERE a.id IN (p.region_id, p.city_id, p.district_id, p.neighborhood_id))
+                  AND NOT EXISTS (SELECT 1 FROM research_cells rc WHERE rc.city_id = a.id)
+                  AND NOT EXISTS (SELECT 1 FROM admin_areas c WHERE c.parent_id = a.id)
+            ), names AS (DELETE FROM admin_area_names WHERE area_id IN (SELECT id FROM stale))
+            DELETE FROM admin_areas WHERE id IN (SELECT id FROM stale)""", {"country": country})
         cur.execute("""UPDATE admin_areas SET area_km2 = CASE WHEN is_point THEN 0
                            ELSE ST_Area(geom::geography) / 1e6 END
                        WHERE country_code = %s AND source = 'wof'""", (country,))
@@ -138,6 +163,33 @@ def load_wof(conn, path: Path, country: str) -> int:
         cur.execute("""INSERT INTO admin_area_names (area_id, lang, name)
                        SELECT s.id, n.key, n.value FROM s_wof s JOIN admin_areas a ON a.id = s.id,
                               jsonb_each_text(s.names) n""")
+    return count
+
+
+def load_osm_neighborhood_points(conn, bounds: tuple[float, float, float, float], country: str) -> int:
+    """Load OpenStreetMap's named neighborhood points (place=suburb, quarter, neighbourhood) inside bounds."""
+    from . import net
+    south, west, north, east = bounds
+    payload = net.overpass(f'[out:json][timeout:180];node["place"~"^(suburb|quarter|neighbourhood)$"]["name"]'
+                           f'({south},{west},{north},{east});out;')
+    count = 0
+    for node in payload.get("elements", []):
+        tags = node.get("tags", {})
+        names = {lang: tags[key] for key, lang in (("name:en", "en"), ("name:zh-Hant", "zh-Hant"),
+                                                    ("name:zh-Hans", "zh-Hans"), ("name:zh", "zh-Hant"))
+                 if tags.get(key)}
+        name = names.get("en") or tags["name"]
+        area_id = -(OSM_NODE_OFFSET + int(node["id"]))
+        conn.execute("""
+            INSERT INTO admin_areas (id, source, placetype, level, name, country_code, geom, area_km2, license, wikidata_id)
+            VALUES (%s, 'osm', %s, 'neighborhood', %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), 0, 'ODbL-1.0', %s)
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, geom = EXCLUDED.geom, wikidata_id = EXCLUDED.wikidata_id""",
+                     (area_id, "place_" + tags["place"], name, country, node["lon"], node["lat"], tags.get("wikidata")))
+        conn.execute("DELETE FROM admin_area_names WHERE area_id = %s", (area_id,))
+        for lang, text in names.items():
+            conn.execute("INSERT INTO admin_area_names (area_id, lang, name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                         (area_id, lang, text))
+        count += 1
     return count
 
 
@@ -229,7 +281,7 @@ def romanize(name: str) -> str:
     return word[:1].upper() + word[1:]
 
 
-def english_names_from_wikidata(conn) -> int:
+def english_names_from_wikidata(conn, place_ids: list[str] | None = None) -> int:
     """Name the boundaries places use from Wikidata, found through the boundary's own link or through
     Wikidata's OpenStreetMap relation id (P402). Those are usually the names people know (Lujiazui
     rather than Lu Jia Zui). Division words are dropped, and Chinese-only names are romanized."""
@@ -240,8 +292,8 @@ def english_names_from_wikidata(conn) -> int:
                (SELECT name FROM admin_area_names WHERE area_id = a.id AND lang = 'zh-Hans') AS chinese
         FROM admin_areas a
         WHERE a.id IN (SELECT unnest(ARRAY[region_id, city_id, district_id, neighborhood_id])
-                       FROM places WHERE state = 'active')
-    """).fetchall()
+                       FROM places WHERE state = 'active' AND (%s::text[] IS NULL OR id = ANY(%s)))
+    """, (place_ids, place_ids)).fetchall()
     missing = [a for a in areas if not a["wikidata_id"] and a["source"] == "osm"]
     if missing:
         values = " ".join(f'"{-a["id"]}"' for a in missing)
@@ -278,7 +330,11 @@ def english_names_from_wikidata(conn) -> int:
 
 ASSIGN = """
 WITH target AS (
-    SELECT id, geom, country_code FROM places WHERE state = 'active' AND (%(only)s::text[] IS NULL OR id = ANY(%(only)s))
+    -- A new place has no country yet; the country boundary it's in decides which sources to prefer.
+    SELECT p.id, p.geom, coalesce(p.country_code, (
+               SELECT upper(a.country_code) FROM admin_area_parts ap JOIN admin_areas a ON a.id = ap.area_id
+               WHERE a.level = 'country' AND ap.geom && p.geom AND ST_Intersects(ap.geom, p.geom) LIMIT 1)) AS country_code
+    FROM places p WHERE p.state = 'active' AND (%(only)s::text[] IS NULL OR p.id = ANY(%(only)s))
 ),
 -- Every boundary piece under each place, found through the spatial index first.
 hits AS MATERIALIZED (
@@ -317,7 +373,8 @@ nearest AS (
           AND a.geom && ST_Expand(t.geom, 0.03)
           AND (a.parent_id = c.city_id OR ST_Intersects(ST_PointOnSurface(a.geom), ci.geom))
           AND ST_DWithin(a.geom::geography, t.geom::geography, %(nearest)s)
-        ORDER BY ST_Distance(a.geom, t.geom) LIMIT 1
+        ORDER BY (a.source = coalesce(%(preferred)s::jsonb -> t.country_code ->> 'neighborhood', a.source)) DESC,
+                 ST_Distance(a.geom, t.geom) LIMIT 1
     ) n
     WHERE c.neighborhood_id IS NULL
 )

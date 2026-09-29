@@ -33,6 +33,17 @@ def hierarchy_load_osm(args) -> int:
     return 0
 
 
+@command("hierarchy load-osm-points", "Load OpenStreetMap's named neighborhood points inside a box.",
+         arg("--bounds", required=True, help="south,west,north,east"), arg("--country", required=True))
+def hierarchy_load_osm_points(args) -> int:
+    from . import hierarchy
+    bounds = tuple(float(x) for x in args.bounds.split(","))
+    with db.connect(actor="hierarchy") as conn:
+        count = hierarchy.load_osm_neighborhood_points(conn, bounds, args.country.upper())
+    print(f"Loaded {count} OpenStreetMap neighborhood points.")
+    return 0
+
+
 @command("hierarchy index", "Split every boundary into small pieces for fast lookups (after loading).")
 def hierarchy_index(args) -> int:
     from . import hierarchy
@@ -354,6 +365,41 @@ def places_search(args) -> int:
         print(f"{r['id']}  {r['name']}{also}  {r['city'] or ''}  {refs}  cell {r['cell']}")
     if not rows:
         print("Nothing found.")
+    return 0
+
+
+# Cities ------------------------------------------------------------------------------------------------
+
+@command("city add", "Set up a city for research: boundaries, districts, neighborhoods, and research cells.",
+         arg("name", help="the city's English name, e.g. 'Hong Kong'"),
+         arg("--country", required=True, help="ISO country code, e.g. HK"),
+         arg("--reload", action="store_true", help="load the country's boundaries again (after changing how they're read)"))
+def city_add(args) -> int:
+    import subprocess
+    from . import cities, publish
+    # The heavy lifting runs on the server, so it gets this code first.
+    subprocess.run(["sh", "server/deploy.sh"], cwd=ROOT, check=True, capture_output=True)
+    result = cities.add(db.connect, publish.settings()["host"], args.name, args.country, args.reload)
+    city = result["city"]
+    print(f"{city['name']} ({city['country_code']}) is ready: {result['cells']} research cells, "
+          f"{result['already_done']} already covered.")
+    print(f'Research it with: uv run psst research claim --city "{city["name"]}"')
+    return 0
+
+
+@command("city list", "Every city set up for research, with its progress.")
+def city_list(args) -> int:
+    with db.connect() as conn:
+        rows = conn.execute("""
+            SELECT ci.name, ci.country_code, count(*) AS cells,
+                   count(*) FILTER (WHERE rc.state = 'done') AS done,
+                   count(*) FILTER (WHERE rc.state IN ('claimed', 'drafted', 'reviewed')) AS in_progress,
+                   (SELECT count(*) FROM places p WHERE p.city_id = ci.id AND p.state = 'active') AS places
+            FROM research_cells rc JOIN admin_areas ci ON ci.id = rc.city_id
+            GROUP BY ci.id, ci.name, ci.country_code ORDER BY places DESC""").fetchall()
+    for r in rows:
+        print(f"{r['name']} ({r['country_code']}): {r['places']} places. {r['done']} of {r['cells']} cells done, "
+              f"{r['in_progress']} in progress.")
     return 0
 
 

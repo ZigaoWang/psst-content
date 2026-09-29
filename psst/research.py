@@ -38,8 +38,8 @@ def find_city(conn, name: str, country: str | None = None) -> dict:
           AND EXISTS (SELECT 1 FROM admin_area_parts WHERE area_id = admin_areas.id)
         ORDER BY area_km2 DESC""", (name, country, country)).fetchall()
     if not rows:
-        raise RuntimeError(f"No indexed city boundary called {name!r}. Load boundaries for its country first "
-                           "(psst hierarchy load-wof, then psst hierarchy index).")
+        raise RuntimeError(f"No city called {name!r} is set up. Set it up with: "
+                           f"uv run psst city add \"{name}\" --country <ISO code>")
     if len({r["country_code"] for r in rows}) > 1 and not country:
         options = ", ".join(f"{r['name']} ({r['country_code']})" for r in rows)
         raise RuntimeError(f"Several cities are called {name!r}: {options}. Pass --country.")
@@ -457,6 +457,11 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
     if new_place_ids:
         # Also fills in each new place's country.
         hierarchy.assign(conn, new_place_ids)
+        try:
+            # Areas a city's first places land in get their usual English names from Wikidata.
+            hierarchy.english_names_from_wikidata(conn, new_place_ids)
+        except RuntimeError:
+            pass  # Wikidata unavailable: the boundary names from the data files stay; nothing depends on it.
     notes = draft.get("notes", "")
     if draft.get("skipped"):
         notes += ("\n" if notes else "") + "Skipped: " + "; ".join(f"{s['name']} ({s['reason']})" for s in draft["skipped"])
