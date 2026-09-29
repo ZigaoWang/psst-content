@@ -37,20 +37,23 @@ install -m 755 server/backup.sh /usr/local/bin/psst-backup
 install -m 644 server/psst-backup.cron /etc/cron.d/psst-backup
 
 # TLS first over plain HTTP, then the full config.
+hostnames="${PSST_HOSTNAMES:-psst.zigao.wang psst.67-230-170-225.sslip.io}"
 if [ ! -f /etc/letsencrypt/live/psst/fullchain.pem ]; then
+  # First run: serve only the ACME challenge until there's a certificate for the full config to use.
   cat > /etc/nginx/conf.d/psst.conf <<CONF
 server {
     listen 80;
-    server_name ${PSST_HOSTNAMES:-psst.67-230-170-225.sslip.io};
+    server_name $hostnames;
     location /.well-known/acme-challenge/ { root $base/public; }
 }
 CONF
   nginx -t && systemctl reload nginx
-  domains=""
-  for h in ${PSST_HOSTNAMES:-psst.67-230-170-225.sslip.io}; do domains="$domains -d $h"; done
-  certbot certonly --webroot -w "$base/public" --cert-name psst --non-interactive --agree-tos \
-    --register-unsafely-without-email $domains
 fi
+# Adds any hostname the certificate doesn't cover yet; does nothing when it's current.
+domains=""
+for h in $hostnames; do domains="$domains -d $h"; done
+certbot certonly --webroot -w "$base/public" --cert-name psst --expand --keep-until-expiring --non-interactive \
+  --agree-tos --register-unsafely-without-email $domains
 install -m 644 server/nginx.conf /etc/nginx/conf.d/psst.conf
 nginx -t && systemctl reload nginx
 echo "Psst server setup done."
