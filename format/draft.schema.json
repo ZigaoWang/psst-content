@@ -193,6 +193,15 @@
               "items": {
                 "$ref": "#/$defs/fact"
               }
+            },
+            "distinctFrom": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^pl_[0-9a-hjkmnp-tv-z]{10}$"
+              },
+              "description": "Nearby places with similar names that this one is not (a separate structure on the same site). The duplicate check then warns instead of refusing, and the reviewer checks it."
             }
           }
         }

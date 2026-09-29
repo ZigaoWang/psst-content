@@ -388,6 +388,7 @@ A draft is one JSON file for one cell. The schema is `format/draft.schema.json`;
 | `places[].place` | For facts about a place already in Psst: its id (`pl_...`). Nothing else about the place goes in. |
 | `places[].name`, `localName`, `kind`, `size` | For a new place. See section 9. |
 | `places[].wikidata`, `osm` | For a new place: at least one. If you give both, they must be the same thing. |
+| `places[].distinctFrom` | Optional. Ids of nearby places with similar names that this one is not (a windmill base next to the engine house on the same site). `draft check` then warns instead of refusing, and the reviewer confirms it. |
 | `places[].facts` | 1 to 4 facts, best first. Each has `category`, `veracity`, `headline`, `short`, `long`, `sources` (each with `url`, `title`, `publisher`), and `tags` (tag ids; `[]` for none). |
 | `skipped` | Every lead from the brief you didn't add: `name` (or `names`, a list, for several with one reason), `reason`, and optionally `wikidata` or `osm`. Add `"later": true` for leads not reached in this pass; the cell stays open for them. |
 

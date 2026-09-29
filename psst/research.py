@@ -451,9 +451,13 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
                 WHERE p.state = 'active' AND ST_DWithin(p.geom::geography, ST_MakePoint(%(lon)s, %(lat)s)::geography, %(d)s)
                   AND similarity(lower(n.name), lower(%(name)s)) > 0.4 LIMIT 1""",
                                 {"lat": pos.lat, "lon": pos.lon, "d": DUPLICATE_METERS, "name": place["name"]}).fetchone()
-            if near:
-                report.error(where, f"looks like {near['id']} ({near['name']}), {near['m']} m away; if it really is "
-                                    "a different thing, say how in the facts and ask a reviewer")
+            if near and near["id"] in place.get("distinctFrom", []):
+                report.warn(where, f"marked as distinct from {near['id']} ({near['name']}), {near['m']} m away; "
+                                   "the reviewer should confirm they're separate things")
+            elif near:
+                report.error(where, f"looks like {near['id']} ({near['name']}), {near['m']} m away. If it's that place, "
+                                    f'add facts to it with {{"place": "{near["id"]}"}}. If it really is a separate thing, '
+                                    f'add "distinctFrom": ["{near["id"]}"] to this place')
     elif not online and new_places:
         report.warn("draft", "coordinates not checked (offline); submit always checks them")
     return Checked(report, positions)
