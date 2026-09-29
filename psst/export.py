@@ -67,7 +67,7 @@ def build(conn, out_root: Path, include: list[str] = ()) -> Export:
                         '[]') AS sources,
                coalesce((SELECT array_agg(tag_id ORDER BY tag_id) FROM fact_tags WHERE fact_id = f.id), '{}') AS tags
         FROM facts f JOIN places p ON p.id = f.place_id
-        WHERE (f.state = 'published' OR f.id = ANY(%s)) AND p.state = 'active'
+        WHERE (f.state = 'published' OR (f.state = 'reviewed' AND f.id = ANY(%s))) AND p.state = 'active'
         ORDER BY f.place_id, f.position, f.id""", (list(include),)).fetchall()
     if not facts:
         raise ExportError("Nothing is published.")
@@ -102,7 +102,7 @@ def build(conn, out_root: Path, include: list[str] = ()) -> Export:
                coalesce((SELECT array_agg(label ORDER BY label) FROM tag_labels
                          WHERE tag_id = t.id AND NOT is_canonical), '{}') AS aliases
         FROM tags t JOIN fact_tags ft ON ft.tag_id = t.id JOIN facts f ON f.id = ft.fact_id
-        WHERE f.state = 'published' OR f.id = ANY(%s) GROUP BY t.id
+        WHERE f.state = 'published' OR (f.state = 'reviewed' AND f.id = ANY(%s)) GROUP BY t.id
         HAVING count(DISTINCT f.place_id) >= %s ORDER BY t.id""", (list(include), tags.MIN_PLACES_TO_PUBLISH)).fetchall()
     published_tags = {t["id"] for t in tag_rows}
 
