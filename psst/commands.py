@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from . import db
-from .cli import arg, command
+from .cli import arg, command, print_json
 
 
 @command("hierarchy load-wof", "Load a Who's On First admin bundle for one country (run on the VPS).",
@@ -71,4 +72,169 @@ def names_fetch(args) -> int:
         result = names.apply(conn, places)
     print(f"Stored {result['names']} names for {len(places)} places; "
           f"recorded {result['wikidata_ids']} Wikidata ids found through OpenStreetMap.")
+    return 0
+
+
+# Runs ------------------------------------------------------------------------------------------------
+
+RUN_ARG = arg("--run", default=os.environ.get("PSST_RUN"), help="the run doing this work (default: $PSST_RUN)")
+
+
+@command("run start", "Start a pipeline run and print its id. Every change is recorded against a run.",
+         arg("--kind", required=True, help="research, review, tagging, verify, publish, or manual"),
+         arg("--model", default=os.environ.get("PSST_MODEL"),
+             help="the model doing the work, e.g. claude-sonnet-5-5 (default: $PSST_MODEL; omit for a person)"),
+         arg("--cell", help="the research cell, for research and review runs"),
+         arg("--notes", help="anything worth knowing about this run"))
+def run_start(args) -> int:
+    from . import runs
+    with db.connect() as conn:
+        print(runs.start(conn, args.kind, args.model, args.cell, args.notes))
+    return 0
+
+
+@command("run finish", "Mark a run finished.", arg("run_id"))
+def run_finish(args) -> int:
+    from . import runs
+    with db.connect() as conn:
+        runs.finish(conn, args.run_id)
+    return 0
+
+
+# Tags ------------------------------------------------------------------------------------------------
+
+@command("tags search", "Find tags by name or alias.", arg("text"), arg("--json", action="store_true"))
+def tags_search(args) -> int:
+    from . import tags
+    with db.connect() as conn:
+        found = tags.find(conn, args.text)
+    if args.json:
+        print_json(found)
+    for t in found if not args.json else []:
+        print(f"{t['id']}  {t['canonical_name']}  ({t['type']}, {t['places']} places, "
+              f"{t['wikidata_id'] or 'no Wikidata'}, match {t['score']:.2f})")
+    return 0
+
+
+@command("tags list", "List every tag with how many places use it.", arg("--json", action="store_true"))
+def tags_list(args) -> int:
+    with db.connect() as conn:
+        rows = conn.execute("""
+            SELECT t.id, t.canonical_name, t.type, t.wikidata_id,
+                   (SELECT string_agg(label, ', ' ORDER BY label) FROM tag_labels l
+                    WHERE l.tag_id = t.id AND NOT l.is_canonical) AS aliases,
+                   (SELECT count(DISTINCT f.place_id) FROM fact_tags ft JOIN facts f ON f.id = ft.fact_id
+                    WHERE ft.tag_id = t.id AND f.state <> 'retired') AS places
+            FROM tags t ORDER BY places DESC, canonical_name""").fetchall()
+    if args.json:
+        print_json(rows)
+        return 0
+    for t in rows:
+        aliases = f"  aka {t['aliases']}" if t["aliases"] else ""
+        print(f"{t['id']}  {t['places']:>4}  {t['type']:<15} {t['canonical_name']}{aliases}")
+    return 0
+
+
+@command("tags wikidata", "Look up Wikidata items for a would-be tag.", arg("text"))
+def tags_wikidata(args) -> int:
+    import urllib.parse
+    from . import net
+    payload = net.fetch_json("https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en"
+                             "&limit=7&search=" + urllib.parse.quote(args.text))
+    for item in payload.get("search", []):
+        print(f"{item['id']}  {item.get('label', '')}: {item.get('description', '')}")
+    return 0
+
+
+@command("tags propose", "Add a tag, or get the existing one it duplicates. Prints the tag id.",
+         arg("name", help="the canonical name, e.g. 'The Beatles'"),
+         arg("--type", required=True, help="person_or_group, event, era, theme, or movement"),
+         arg("--wikidata", help="the Wikidata item, e.g. Q1299 (use psst tags wikidata to find it)"),
+         arg("--alias", action="append", default=[], help="another way people write it (repeatable)"),
+         arg("--description", help="one line saying what the tag covers"),
+         arg("--distinct-from", action="append", default=[],
+             help="a similar existing tag id you checked is a different thing (repeatable)"),
+         RUN_ARG)
+def tags_propose(args) -> int:
+    from . import net, names as place_names, runs, tags
+    with db.connect(actor="tags") as conn:
+        runs.require(conn, args.run)
+        labels = {}
+        if args.wikidata:
+            entity = net.wikidata_entities([args.wikidata], props="labels").get(args.wikidata, {})
+            for lang, codes in place_names.WIKIDATA_LANGUAGES.items():
+                for code in codes:
+                    if code in entity.get("labels", {}) and lang != "en":
+                        labels[lang] = entity["labels"][code]["value"]
+                        break
+        result = tags.propose(conn, args.name, args.type, args.wikidata, tuple(args.alias), args.description,
+                              tuple(args.distinct_from), args.run, labels)
+    if result.status == "similar":
+        print("Not created: similar tags already exist. Use one of these, or pass --distinct-from for each "
+              "one that is truly a different thing:")
+        for t in result.similar:
+            print(f"  {t['id']}  {t['canonical_name']}  ({t['type']}, {t['wikidata_id'] or 'no Wikidata'}, "
+                  f"match {t['score']:.2f})")
+        return 2
+    print(f"{result.tag['id']}  {result.tag['canonical_name']}  ({result.status})")
+    return 0
+
+
+@command("tags merge", "Fold one tag into another.", arg("source"), arg("target"), RUN_ARG)
+def tags_merge(args) -> int:
+    from . import runs, tags
+    with db.connect(actor="tags") as conn:
+        runs.require(conn, args.run)
+        tags.merge(conn, args.source, args.target)
+    print(f"Merged {args.source} into {args.target}.")
+    return 0
+
+
+@command("tags audit", "List pairs of tags that look like duplicates.")
+def tags_audit(args) -> int:
+    from . import tags
+    with db.connect() as conn:
+        pairs = tags.audit(conn)
+    for p in pairs:
+        print(f"{p['score']:.2f}  {p['a']} {p['a_name']}  <->  {p['b']} {p['b_name']}")
+    print(f"{len(pairs)} pairs to look at.")
+    return 0
+
+
+@command("tags work", "Write facts that need tags to a file for a tagging agent.",
+         arg("--out", required=True), arg("--city", help="only this city (English name)"),
+         arg("--district", help="only this district (English name)"),
+         arg("--untagged", action="store_true", help="only facts with no tags yet"))
+def tags_work(args) -> int:
+    import json
+    with db.connect() as conn:
+        rows = conn.execute("""
+            SELECT f.id, pn.name AS place, ci.name AS city, di.name AS district, f.category, f.veracity,
+                   f.headline, f.short, f.long,
+                   coalesce((SELECT array_agg(tag_id) FROM fact_tags WHERE fact_id = f.id), '{}') AS tags
+            FROM facts f JOIN places p ON p.id = f.place_id
+            JOIN place_names pn ON pn.place_id = p.id AND pn.role = 'display'
+            LEFT JOIN admin_areas ci ON ci.id = p.city_id LEFT JOIN admin_areas di ON di.id = p.district_id
+            WHERE f.state <> 'retired' AND (%(city)s::text IS NULL OR ci.name = %(city)s)
+              AND (%(district)s::text IS NULL OR di.name = %(district)s)
+              AND (NOT %(untagged)s OR NOT EXISTS (SELECT 1 FROM fact_tags WHERE fact_id = f.id))
+            ORDER BY ci.name, di.name, pn.name, f.position""",
+                            {"city": args.city, "district": args.district, "untagged": args.untagged}).fetchall()
+    with open(args.out, "w", encoding="utf-8") as out:
+        for row in rows:
+            out.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(f"Wrote {len(rows)} facts to {args.out}.")
+    return 0
+
+
+@command("tags apply", "Set tags on facts from a JSON file: {\"fa_...\": [\"tg_...\", ...], ...}.",
+         arg("file"), RUN_ARG)
+def tags_apply(args) -> int:
+    import json
+    from . import runs, tags
+    assignments = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    with db.connect(actor="tags", run=args.run) as conn:
+        runs.require(conn, args.run, "tagging")
+        tags.assign_many(conn, {fact: list(tag_ids) for fact, tag_ids in assignments.items()})
+    print(f"Tagged {len(assignments)} facts.")
     return 0
