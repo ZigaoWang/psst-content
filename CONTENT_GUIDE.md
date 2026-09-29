@@ -1,22 +1,24 @@
 # Psst content guide
 
-This is the handbook for adding places to Psst. It's written for a Claude Code session, or a person, who has been asked to research an area and add it. It works for any kind of place: a dense city center, a quiet residential neighborhood, a small town, a stretch of coastline, a university campus. Read the whole guide before you start. The facts are the product, so the bar is high.
+This is the handbook for researching, reviewing, and publishing Psst's places and stories. It's written for a Claude Code session, or a person, who has been asked to do one of those jobs. Everything happens through the `psst` command; you never need to read the code. Read the whole guide before you start. The facts are the product, so the bar is high.
 
 ## Contents
 
 1. What Psst is for
-2. The workflow
-3. Planning areas
-4. Finding spots
-5. Choosing spots
-6. Writing facts
-7. Sources
-8. Coordinates
-9. The file format
-10. Editing existing areas
-11. Checking your work
-12. Committing and publishing
-13. Regional notes
+2. How content flows
+3. Setup
+4. Runs
+5. Researching a cell
+6. Choosing places
+7. Writing facts
+8. Sources
+9. Places, names, and coordinates
+10. Tags
+11. The draft format
+12. Reviewing
+13. Publishing
+14. Fixing published content
+15. Regional notes
 
 ## 1. What Psst is for
 
@@ -28,106 +30,102 @@ Three rules sit above everything else in this guide:
 
 - **Surprising.** If a friend wouldn't say "wait, really?", it doesn't go in.
 - **True.** Every fact is sourced, and anything unproven is labeled as a legend or disputed. Never let a good story pass as a fact.
-- **Findable.** Every spot is one physical thing someone can walk up to and point at, with a pin from a real source.
+- **Findable.** Every place is one physical thing someone can walk up to and point at, with a pin from a real source.
 
-## 2. The workflow
+## 2. How content flows
 
-1. **Plan.** Define the area (or, for a whole city or region, the full set of areas) and write the plan down. See section 3.
-2. **Sweep.** Collect a long list of candidate spots with `scripts/sweep.py`, not from memory. See section 4.
-3. **Research and cut.** Research each candidate. Keep only the ones with something genuinely surprising to say. See section 5.
-4. **Locate.** Get every coordinate from Wikidata or OpenStreetMap with `scripts/coords.py`. See section 8.
-5. **Write.** Write each fact as a headline, a short version, and a long version, with sources and an honest status. See sections 6 and 7.
-6. **Save.** Save the area as `areas/<area-id>.json` in this repository and run `python3 scripts/format.py`.
-7. **Check.** Run the validator, fix everything, then do the human review. See section 11.
-8. **Commit and publish.** One commit per area, then publish into the app. See section 12.
+All content lives in one PostgreSQL database on the Psst server. The app never reads the database: it downloads files that `psst publish` generates from it.
 
-The tools, all run from the repository root:
+Every fact moves through four states, and only one of them reaches the app:
 
-| command | what it does |
+| state | meaning |
 | --- | --- |
-| `python3 scripts/sweep.py --bounds S,W,N,E --name <area-id> [--lang zh]` | collects candidates from OpenStreetMap and Wikipedia into `candidates/` (not committed) |
-| `python3 scripts/coords.py Q123 way/456` | prints exact coordinates, ready to paste, and refuses imprecise ones |
-| `python3 scripts/format.py` | rewrites area files in the one canonical format |
-| `python3 scripts/validate.py [--online]` | checks every rule in this guide that a script can check |
-| `python3 scripts/stats.py [prefix]` | places, facts, categories, and statuses per area |
-| `python3 scripts/publish.py` | validates everything, then copies the areas into the app |
+| `draft` | Written by a researcher. This is the only state research can create. |
+| `reviewed` | Checked and approved by a separate review run. |
+| `published` | In the app. Set by `psst publish`, and only after staging passes its checks. |
+| `retired` | Rejected in review, or taken down. Kept forever with the reason, never deleted. |
 
-## 3. Planning areas
+Every change is recorded against the run that made it, and every state change, edit, and flag goes into the fact's history (`fact_events`). Each fact keeps when it was researched and by which model, which run reviewed it and what they checked, when it was published, and when it was last verified.
 
-An area is how research is split up, and how the app groups and frames places on the map. It's never a spot itself.
+The world is split into research cells: H3 hexagons at resolution 7, each about 5 km² (roughly 2.5 km across). Research happens one cell at a time. Places are grouped in the app by city and neighborhood, which the tools assign from real boundary data (Who's On First and OpenStreetMap). Never type an area, district, or neighborhood yourself.
 
-### Sizing an area
+The jobs:
 
-- **Dense city centers:** roughly 1 to 2 km across. There's more than enough in that space.
-- **Residential neighborhoods and suburbs:** 2 to 4 km across.
-- **Small towns and villages:** usually the whole town is one area.
-- **Countryside, coastlines, and parks:** follow the natural unit (a valley, a stretch of coast, a national park section), up to about 15 km across. The validator warns above 15 km and refuses anything over 20 km.
+- **Researcher:** claims a cell, researches it, and submits a draft (sections 5 to 11).
+- **Reviewer:** a different run, skeptical by default, that approves, edits, or rejects each draft fact and handles problem reports (section 12).
+- **Publisher:** runs `psst publish`, which stages everything, checks it, and only then goes live (section 13).
 
-Follow the boundaries locals actually use. An area called "Soho" should feel like Soho to someone who lives there.
+Use a different session for review than for research. If you can, use a different model too.
 
-### Naming an area
+## 3. Setup
 
-- `id`: `place-area` in lowercase kebab case, like `london-greenwich`, `shanghai-the-bund`, or `cornwall-st-ives`. It can never change once published.
-- `name`: the everyday name of the area.
-- `city`: the city the area belongs to. For places outside a city, use the nearest town or the region people would name (`Cornwall`, `Lake District`). Areas with the same `city` are grouped together in the app, so spell it the same way every time (`London`, never `Greater London`).
+Once per machine:
 
-### Planning a whole city or region
+1. Install [uv](https://docs.astral.sh/uv/), then run `uv sync` in this repository.
+2. Make sure `ssh bwh` reaches the Psst server without a password prompt. The tools open their own tunnel to the database through it.
+3. Create `~/.config/psst/env` with the database password (ask the owner; never commit it):
+   ```
+   PSST_DB_PASSWORD=...
+   PSST_CONTENT_URL=https://psst.zigao.wang
+   ```
+4. Check it works: `uv run psst status`.
 
-1. Write the plan to `plans/<city>.md` before researching anything: every area id, its name, its bounding box, and a status column (`planned`, `in progress`, `done`). It lets work continue across sessions and lets parallel researchers see who owns what. Plans are working notes for a seeding run, so `plans/` is ignored by git; the areas themselves are the record.
-2. Make sure the boxes cover everything with no gaps between neighbors. Small overlaps at the edges are fine; section 10 explains who owns a border spot.
-3. Go beyond the tourist center. Residential neighborhoods, outer districts, markets, and industrial edges often have the best ordinary place stories.
-4. Research areas in parallel if you can, but check for overlap before adding any spot near a border. Keep parallel work to a handful of areas at a time: Wikidata and Overpass are shared services and will start refusing requests.
-5. Validate and commit each area as it's finished and update its status in the plan, then do a final check across all of them for duplicates and gaps.
+Every command below is `uv run psst ...`. `uv run psst --help` lists them, and `uv run psst <command> --help` explains each one.
 
-## 4. Finding spots
+## 4. Runs
 
-Don't rely on what you already know about an area. That's how famous places get missed and ordinary ones never get found. Sweep first, collect a long list, then research and cut. A good sweep usually produces three to five times more candidates than end up in the file.
-
-Start with the sweep script:
+Every batch of work is a run: one cell's research, one review session, one tagging pass. Start one before you change anything, and pass its id to each command with `--run`, or export it:
 
 ```
-python3 scripts/sweep.py --bounds 51.468,-0.025,51.490,0.010 --name london-greenwich
-python3 scripts/sweep.py --area london-greenwich                       # an existing area's bounds
-python3 scripts/sweep.py --bounds ... --name shanghai-jingan --lang zh  # add a local language Wikipedia
+export PSST_RUN=$(uv run psst run start --kind research --model claude-opus-5-5 --notes "Coulsdon cell")
+...
+uv run psst run finish $PSST_RUN
 ```
 
-It runs the OpenStreetMap query below over the area, searches Wikipedia across a grid of points so nothing falls between the circles, merges the two, and marks candidates that are already in an area file. The results land in `candidates/<name>.md`, with Wikidata ids and OSM elements where known. Outside English speaking places, always add the local language with `--lang` (`zh`, `ms`, `ja`, and so on): local wikis cover buildings the English one ignores.
+`--model` is the model doing the work, exactly as its id reads (`claude-opus-5-5`, `claude-sonnet-5`). Leave it out only when a person does the work. Kinds: `research`, `review`, `tagging`, `verify`, `manual`.
 
-For reference, the OpenStreetMap part of the sweep is:
+## 5. Researching a cell
 
-```
-[out:json][timeout:180][bbox:S,W,N,E];
-(
-  nwr[historic]; nwr[heritage]; nwr[memorial];
-  nwr[tourism~"attraction|museum|artwork|viewpoint|hotel|gallery"];
-  nwr[railway=station]; nwr[public_transport=station]; nwr[amenity=ferry_terminal];
-  nwr[amenity~"pub|bar|cafe|restaurant|theatre|cinema|place_of_worship|marketplace"][wikidata];
-  nwr[amenity=pub];
-  nwr[shop][wikidata]; nwr[building][wikidata]; nwr[man_made][wikidata];
-  nwr[natural][wikidata]; nwr[bridge][name];
-);
-out center tags;
-```
+1. **Start a research run** (section 4).
+2. **Claim a cell.**
+   ```
+   uv run psst research claim --city London        # the most wanted open cell in London
+   uv run psst research claim --cell 87194ac00ffffff
+   ```
+   With no `--cell`, it picks the open cell app users asked about most, then the one next to the most finished cells, so coverage grows outward. The claim lasts 12 hours. If you give up, `uv run psst research release <cell>`.
+3. **Read the brief** in `work/<cell>/brief.md` (and `brief.json`). It has the cell's bounds and neighborhoods, every place already in this cell and the six around it with their facts, and leads from Wikipedia (in English and the local language) and OpenStreetMap, each marked when it's already in Psst. A sweep is a long list of leads, not a list of places: most will be cut.
+4. **Add what the sweep can't see.** Heritage and plaque records (Historic England in the UK, the equivalent body elsewhere), local history societies, station and transit histories, pub histories, filming location databases, music history sites. Then sanity check against the obvious: if a visitor would expect a place here, it should be here, unless there's truly nothing surprising to say.
+5. **Check nothing is already in Psst.** `uv run psst places search "Cutty Sark"` finds places by name in any language, or by Wikidata id or OSM element. To add facts to an existing place, reference its id in the draft (section 11); never create it again.
+6. **Research and cut** (section 6), **write** (sections 7 and 8), **tag** (section 10), and save the draft as `work/<cell>/draft.json` (section 11).
+7. **Check the draft** until it has no errors, and read every warning:
+   ```
+   uv run psst draft check work/<cell>/draft.json
+   ```
+   It checks the format, every writing rule, sources, tag ids, duplicates of existing places (by Wikidata id, OSM element, and similar names within 150 meters), and looks up every coordinate.
+8. **Do your own review** before submitting. For every fact: does the source actually say this (open it)? Is the veracity honest? Would a friend say "wait, really?" Does the short version stand on its own? Does it sound like the fact before it?
+9. **Submit:**
+   ```
+   uv run psst draft submit work/<cell>/draft.json
+   ```
+   Everything is stored as drafts. New places get their coordinates, license, city, district, and neighborhood automatically, and names in other languages from Wikidata and OpenStreetMap. The cell moves to `drafted`.
+10. **Finish the run.**
 
-Then add what the sweep can't see:
+A cell can come out empty. Suburbs and parks sometimes have nothing that clears the bar. Submit a draft with no places and a `notes` line saying what you checked, so nobody repeats the work. The cell is marked done straight away.
 
-- **Heritage and plaque records.** National and local heritage lists (Historic England in the UK, the equivalent body elsewhere), blue plaques and their local versions, and local history societies.
-- **Specialist sources.** Station and transit histories, pub histories, filming location databases, music history sites, and long-running local history sites. Use these as leads. They can be sources too if they meet the bar in section 7.
+`work/` is a scratch folder and is never committed.
 
-Then sanity check the list against the obvious. If a visitor to this area would expect to find a place in the app, it should be there, unless there's truly nothing surprising to say about it.
+## 6. Choosing places
 
-## 5. Choosing spots
+### What counts as a place
 
-### What counts as a spot
+A place is one specific, findable, physical thing with its own pin: a building, a bridge, a station entrance, a statue, a hotel, a roundabout, a staircase, a lamppost, a pub, a bollard, a plaque, a dock wall, a tree, a rock. Someone should be able to walk up to it and point.
 
-A spot is one specific, findable, physical thing with its own pin: a building, a bridge, a station entrance, a statue, a hotel, a roundabout, a staircase, a lamppost, a pub, a bollard, a plaque, a dock wall, a tree, a rock. Someone should be able to walk up to it and point.
+Never write one entry for a whole district, neighborhood, estate, or street network. If a street is the place, it must be one short, specific street or alley with its own story, and its pin goes on that street. If a big complex has several good stories, split it into its parts (the station entrance, the clock tower, the gate), each with its own pin.
 
-Never write one entry for a whole district, neighborhood, estate, or street network. If a street is the spot, it must be one short, specific street or alley with its own story, and its pin goes on that street. If a big complex has several good stories, split it into its parts (the station entrance, the clock tower, the gate), each with its own pin. The validator warns about names that sound like areas.
+### What every cell should cover
 
-### What every area should cover
-
-- **Ordinary places with a secret.** A bus stop, a car park, a chain hotel, a footbridge, a corner shop. These are the heart of the app. At least half of an area's spots should be places a tourist would never look up.
-- **Every station.** Each metro, rail, tram, and ferry station inside the bounds is a candidate. Most have a story: where the name came from, a closed platform, an entrance that used to be somewhere else, a design detail everyone walks past.
+- **Ordinary places with a secret.** A bus stop, a car park, a chain hotel, a footbridge, a corner shop. These are the heart of the app. At least half of a cell's places should be places a tourist would never look up.
+- **Every station.** Each metro, rail, tram, and ferry station is a candidate. Most have a story: where the name came from, a closed platform, an entrance that used to be somewhere else, a design detail everyone walks past.
 - **Places people actually go.** Hotels (small and ordinary ones too), pubs, cafes, markets, and old shops.
 - **The famous places people come for,** including music, film, TV, and literature spots. Visitors will open the app standing right there, so a missing famous place feels broken. Lead with the detail nobody knows, not the one everyone does.
 
@@ -143,15 +141,15 @@ Never write one entry for a whole district, neighborhood, estate, or street netw
 - Rules and customs that only apply here: odd bylaws, ceremonies, tolls, rents paid in strange things.
 - In nature: a rock with a name and a story, a tree older than the town, a shoreline that used to be somewhere else.
 
-### Targets
+### Targets per cell
 
-- Dense city centers: 30 to 60 spots.
-- Neighborhoods and towns: 20 to 40 spots.
-- Countryside and small places: as many as genuinely deserve it, even if that's 10.
+- Dense city centers: 15 to 40 places.
+- Residential neighborhoods and suburbs: 5 to 20.
+- Countryside, parks, and quiet edges: as many as genuinely deserve it, including none.
 
-Each spot has 1 to 4 facts. One excellent fact is enough for a spot to exist. Quality always beats count: 20 great spots are better than 40 thin ones.
+Each place has 1 to 4 facts. One excellent fact is enough for a place to exist. Quality always beats count.
 
-### Leave a spot out if
+### Leave a place out if
 
 - The best you can say is that it's old, tall, popular, or designed by someone famous.
 - The only interesting thing is a generic superlative ("one of the busiest stations in Europe").
@@ -159,7 +157,9 @@ Each spot has 1 to 4 facts. One excellent fact is enough for a spot to exist. Qu
 - Going there would send people somewhere they shouldn't be: private homes, restricted sites, dangerous places. Public exteriors of private buildings are fine.
 - It would point at a private living person who isn't a public figure, or at the home of a recent crime victim. Places tied to tragedies are fine when the story is historical and written with respect.
 
-## 6. Writing facts
+List the good-looking leads you cut, with why, in the draft's `skipped` list. It saves the next researcher the same work.
+
+## 7. Writing facts
 
 A good fact is **specific, surprising, and true.**
 
@@ -182,9 +182,9 @@ Pick the one that fits best. In the app each category has its own color, and peo
 | `pop` | music, film, TV, books, and games: what was recorded, filmed, or written here |
 | `quirk` | odd rules, strange laws, unusual customs, records, coincidences |
 
-### Status: fact, legend, or disputed
+### Veracity: fact, legend, or disputed
 
-Every fact has a `status`. This is the most important field in the file.
+Every fact has a `veracity`. This is the most important field.
 
 - `fact`: well documented by reliable sources. You'd bet on it.
 - `legend`: a story people tell that's unproven or known to be false. Write it so it's obviously a story ("The story goes that...", "Locals like to say...") and, in the long version, say what the evidence actually shows.
@@ -198,7 +198,7 @@ If you're not sure whether something is a fact, it isn't a `fact`. Be especially
 - `short`: the whisper. One or two sentences, up to 220 characters. It's what shows on the feed card and the map card, so it must stand on its own with no context. Lead with the surprising part.
 - `long`: the story for people who want more, 300 to 1,200 characters. Add context, the how and why, names and dates, and, for legends and disputes, what the evidence says. Don't repeat the short version with more adjectives.
 
-Put a spot's best fact first. It's the one shown on the feed card. Prefer a plain `fact` as the lead; lead with a legend only when it's clearly the best story, since the card then carries a "Legend" label.
+Put a place's best fact first. It's the one shown on the feed card. Prefer a plain `fact` as the lead; lead with a legend only when it's clearly the best story, since the card then carries a "Legend" label.
 
 ### Voice
 
@@ -207,10 +207,10 @@ Write like a well-read friend talking, not like a brochure or an encyclopedia.
 - Plain words, concrete nouns, active verbs.
 - Confident but not breathless. No exclamation marks.
 - Don't address the reader constantly. An occasional "look up at the corner" is fine when it helps them find the thing.
-- Every fact should read like it was written fresh. Watch for phrases you've already used in the same area ("look closely", "most visitors walk past", "to this day") and vary or cut them. The validator warns when a stock phrase shows up in more than two facts of an area.
+- Every fact should read like it was written fresh. Watch for phrases you've already used nearby ("look closely", "most visitors walk past", "to this day") and vary or cut them.
 - Write in your own words. Never copy sentences from a source. Short quotes are fine only when the exact wording matters, and they go in quotation marks.
 - No "did you know", "fun fact", "hidden gem", "psst", or "little-known".
-- Avoid words that make writing sound machine-made: "nestled", "boasts", "testament to", "rich tapestry", "vibrant", "delve", "bustling", "iconic", "stands as", "a must-see", "steeped in history", "whispers of the past", "not just X, but Y". The validator rejects the worst of these.
+- Avoid words that make writing sound machine-made: "nestled", "boasts", "testament to", "rich tapestry", "vibrant", "delve", "bustling", "iconic", "stands as", "a must-see", "steeped in history", "whispers of the past", "not just X, but Y". The checks reject the worst of these.
 
 Good:
 
@@ -228,13 +228,13 @@ A legend done right:
 
 ### Language and spelling
 
-- US English spelling and punctuation everywhere ("color", "center", "theater", "meter", "gray"). The validator catches common British spellings.
-- Proper names keep their own spelling: "Southbank Centre" and "National Theatre" stay as they are. (The validator only checks lowercase words, so capitalized names are safe.)
+- Facts are written in US English, always. Spelling and punctuation too ("color", "center", "theater", "meter", "gray"). The checks catch common British spellings. The app translates stories on the reader's device when they ask; never write or store translations.
+- Proper names keep their own spelling: "Southbank Centre" and "National Theatre" stay as they are. (Only lowercase words are checked, so capitalized names are safe.)
 - Never use em dashes or en dashes. Use a period, a comma, a colon, parentheses, or the word "to" for ranges ("1840 to 1852").
 - Use metric units, with imperial in parentheses where a local reader would expect it ("62 meters (202 feet)" for a London monument built to exactly 202 feet).
 - Write names from other languages the way English speakers see them on the ground, and put the local script in `localName`.
 
-## 7. Sources
+## 8. Sources
 
 Every fact needs at least one real source with a working `https` URL, and at least one source per fact must be something other than Wikipedia. Wikipedia is great for leads, but cite what it cites.
 
@@ -256,114 +256,35 @@ Rules:
 
 - Outside English speaking places, don't rely only on English sources. Read the local language sources, which usually have far more detail about individual buildings and streets, then cite the primary source.
 - Link to the live original page where it exists. An archived copy is fine when the original is gone or unreachable.
-- Never cite a search results page or an AI answer. The validator rejects them.
+- Never cite a search results page or an AI answer. The checks reject them.
 - Avoid content farms, AI-written listicles, and travel sites that don't cite anything.
 - For legends, cite a source that tells the story and, ideally, one that examines it.
 - Open every source and confirm it actually says what the fact claims.
-- `python3 scripts/validate.py --check-links` requests every URL and lists the ones that fail. Some sites refuse scripts; those are ignored.
 
-## 8. Coordinates
+Sources are stored once and shared: cite the same page from two facts and it's one source linked twice. Give it the same title and publisher each time.
 
-Coordinates must come from a real source. Never estimate from memory, from a map you're looking at, or from a street address.
+## 9. Places, names, and coordinates
 
-The easy way: find the Wikidata item or OSM element, then
+### Coordinates
 
-```
-python3 scripts/coords.py Q935104 way/40778038
-```
+You never write coordinates. Each new place names its Wikidata item (`"wikidata": "Q935104"`), its OpenStreetMap element (`"osm": "way/40778038"`), or both, and the tools look up the position when you check and submit. Always WGS-84, including in China; the app handles China's shifted maps itself.
 
-prints the `coordinate` and `coordinateSource` to paste into the spot, using exactly the lookups the validator uses. It refuses Wikidata coordinates that are too imprecise.
+- **Wikidata first.** It's CC0, so it needs no attribution. The item's coordinate (P625) is used when there's exactly one and it's precise to about 50 meters.
+- **OpenStreetMap otherwise.** A node's position, or the middle of a way's or relation's bounding box. OSM data is ODbL, and the app credits it. If you give both and Wikidata's coordinate is missing, doubled, or too coarse, OSM is used automatically.
+- **Check it makes sense.** The Wikidata point for a large thing (a park, a long bridge) is sometimes far from where people stand. If it's clearly wrong for what you describe, give only the OSM element. If neither source has the place, leave it out.
+- **Put the pin where people will stand.** For a small detail on a big building (a plaque, a doorway, a carving), use the OSM node for that detail if one exists. If it doesn't, use the building and say where to look in the fact.
 
-The rules behind it:
+To find an item: `uv run psst tags wikidata "Cutty Sark"` searches Wikidata (it works for places too), and the brief lists the OSM elements in the cell. For anything else, search OpenStreetMap: `[out:json];nwr["name"~"Cutty Sark"](51.47,-0.02,51.49,0.0);out center;` at `https://overpass-api.de/api/interpreter`.
 
-1. **Wikidata first.** If the spot has a Wikidata item with a coordinate (property P625), use it. To find an item: `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=NAME&language=en&format=json`.
-2. **OpenStreetMap otherwise.** Find the node, way, or relation. For a node its position is used; for a way or relation, the center that Overpass computes (the middle of its bounding box). To search by name inside an area: `[out:json];nwr["name"~"Cutty Sark"](51.47,-0.02,51.49,0.0);out center;`
-3. **Check the precision.** If a Wikidata coordinate has fewer than 4 decimal places, it can be 100 meters out. Use the OSM element instead.
-4. **Check it makes sense.** The Wikidata point for a large thing (a park, a long bridge) is sometimes far from where people stand. If it's clearly wrong for what the spot describes, use the OSM element. If neither source has the spot, leave the spot out.
-5. **Put the pin where people will stand.** For a small detail on a big building (a plaque, a doorway, a carving), find the OSM node for that detail if one exists. If it doesn't, use the building and say where to look in the fact.
+A place must fall in the claimed cell or one of its six neighbors. A place in a neighboring cell is fine (you'll get a warning); it belongs to the cell its coordinate is in.
 
-Copy the numbers exactly as the source gives them. Don't round them or add digits. `validate.py --online` re-fetches every coordinate and fails anything more than 30 meters from its source.
+### Names
 
-**Always store WGS-84, everywhere, including China.** Wikidata and OpenStreetMap both use it. The app works out at runtime whether Apple Maps is drawing China in the shifted GCJ-02 system and converts if so (see section 13). Never convert or "fix" coordinates by hand in the data files.
+- `name`: the name people use on the ground, in English where one exists. When a place has no common English name, use the romanized local name people would actually see (pinyin for mainland China, the Malay name in Malaysia) rather than inventing a translation.
+- `localName`: the name on the signs when it differs from the English one, with its language: `{"lang": "zh-Hans", "name": "和平饭店"}`. Always fill it in when the local name differs, so people can match the pin to the sign in front of them.
+- Names in other languages (so a search for 大本钟 finds Big Ben) come from Wikidata labels and OSM name tags automatically. Don't add them.
 
-### Being a good API citizen
-
-- Use a plain User-Agent like `PsstContent/1.0`. Never put an email address or other personal information in a request.
-- Overpass is shared and rate limited. On a 429 or 504, wait a few seconds and retry. Batch lookups where you can: `(way(1);way(2);node(3););out center;`.
-- If Overpass is down, the main OSM API works for single elements: `https://api.openstreetmap.org/api/0.6/node/123.json`, or `.../way/123/full.json` for a way, where the coordinate to use is the middle of the bounding box of its nodes.
-- If the Wikidata API returns 429, the query service at `https://query.wikidata.org/sparql` is limited separately. The tools fall back to both automatically.
-
-## 9. The file format
-
-One JSON file per area in `areas/`, named after the area `id` plus `.json`. UTF-8, two-space indentation, non-ASCII characters written as-is. `scripts/format.py` produces exactly this, and the validator rejects anything else.
-
-```json
-{
-  "schemaVersion": 1,
-  "id": "london-greenwich",
-  "name": "Greenwich",
-  "city": "London",
-  "countryCode": "GB",
-  "summary": "Ships, stars, and the line the whole world sets its clocks by.",
-  "researchedOn": "2026-09-28",
-  "bounds": { "south": 51.4680, "west": -0.0250, "north": 51.4900, "east": 0.0100 },
-  "spots": [
-    {
-      "id": "greenwich-foot-tunnel",
-      "name": "Greenwich Foot Tunnel",
-      "localName": null,
-      "kind": "crossing",
-      "size": "medium",
-      "coordinate": { "latitude": 51.4833, "longitude": -0.0102 },
-      "coordinateSource": { "type": "wikidata", "id": "Q935104" },
-      "facts": [
-        {
-          "id": "built-for-dockers",
-          "category": "history",
-          "status": "fact",
-          "headline": "Built so dockers could get to work",
-          "short": "One or two sentences.",
-          "long": "The longer story.",
-          "sources": [
-            { "title": "Greenwich Foot Tunnel", "publisher": "Royal Borough of Greenwich", "url": "https://www.royalgreenwich.gov.uk/..." }
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-Only the fields below exist. The validator rejects unknown fields, so a typo can't slip through. There's no field for photos yet.
-
-### Area fields
-
-| field | rules |
-| --- | --- |
-| `schemaVersion` | Always `1` for now. |
-| `id` | `place-area` in lowercase kebab case. Must match the filename. Never change it once published. |
-| `name` | The area's everyday name. |
-| `city` | The city, or the nearest town or region for places outside cities. Areas with the same `city` are grouped together. |
-| `countryCode` | ISO 3166-1 alpha-2, like `GB`, `MY`, `CN`. The app uses it to decide between a 3D view and a straight-down satellite view. |
-| `summary` | One sentence, up to 120 characters, in the app's voice. Shown in the area picker. |
-| `researchedOn` | The date of the most recent research, `YYYY-MM-DD`. |
-| `bounds` | A tight box around the area in WGS-84. Every spot must be inside it. The app uses it to frame the area on the map. |
-| `spots` | The list of spots. Order doesn't matter; the app sorts and shuffles. |
-
-### Spot fields
-
-| field | rules |
-| --- | --- |
-| `id` | Lowercase kebab case, unique within the area. Saved spots are stored as `areaId/spotId`, so never change or reuse an id once published. |
-| `name` | The name people use on the ground, in English where one exists. |
-| `localName` | The name in the local script or language if it differs, like `和平饭店` for the Peace Hotel. Otherwise `null` or omitted. The validator warns when it's missing in countries with non-Latin scripts. |
-| `kind` | One of the kinds below. It sets the pin color and icon, and the kind filter. |
-| `size` | `small` (a statue, a door, a bollard), `medium` (a building, a station, a square), or `large` (a skyscraper, a long bridge, a park, a hill). Defaults to `medium`. Small spots are pictured with Apple's Look Around street view where it exists; medium and large spots get a 3D or satellite view, framed further back for large ones. |
-| `coordinate` | `latitude` and `longitude` in WGS-84, copied from `coordinateSource`. |
-| `coordinateSource` | `{ "type": "wikidata", "id": "Q..." }` or `{ "type": "osm", "id": "node/123" }` (also `way/123` or `relation/123`). |
-| `facts` | At least one. The best one goes first. |
-
-### Kinds
+### Kinds and sizes
 
 | kind | for |
 | --- | --- |
@@ -377,97 +298,168 @@ Only the fields below exist. The validator rejects unknown fields, so a typo can
 | `water` | docks, basins, rivers, canals, lakes, fountains, wells |
 | `culture` | museums, theaters, galleries, studios, venues, markets, stadiums |
 
-### Fact fields
+`size` is `small` (a statue, a door, a bollard), `medium` (a building, a station, a square; the default), or `large` (a skyscraper, a long bridge, a park, a hill). Small places are pictured with Apple's Look Around street view where it exists; medium and large ones get a 3D or satellite view, framed further back for large ones.
 
-| field | rules |
+## 10. Tags
+
+Tags are the threads that connect places: a person or group, an event, an era, a movement, or a theme. In the app, tapping one shows every place it connects. A tag appears in the app only once it connects at least three places.
+
+| type | examples |
 | --- | --- |
-| `id` | Lowercase kebab case, unique within the spot. Never change it once published. |
-| `category` | One of `name`, `hidden`, `history`, `design`, `engineering`, `people`, `pop`, `quirk`. |
-| `status` | `fact`, `legend`, or `disputed`. |
-| `headline` | Up to 60 characters. |
-| `short` | Up to 220 characters, one or two sentences. |
-| `long` | 300 to 1,200 characters. |
-| `sources` | At least one. Each has `title`, `publisher`, and an `https` `url`. At least one per fact must not be Wikipedia. |
-
-### Changing the format
-
-New categories, kinds, and fields are app changes too, so they're agreed with the app first. The app is built to cope with content that's newer than it: an unknown category or kind is shown in a neutral style, and a fact or spot it can't read is skipped rather than breaking its area. Even so, add them to the validator and this guide in the same commit, and never repurpose an existing value.
-
-## 10. Editing existing areas
-
-- **Search first.** Before adding a spot, check it isn't already in any area. The sweep marks candidates that are, and `grep -ril "cutty sark" areas/` finds names. A spot belongs to exactly one area; the validator fails two spots with the same coordinate source anywhere in the repository.
-- **Border spots.** A spot near a border goes to whichever area already has it. If neither does, it goes to the area whose bounds contain the coordinate. If both do, pick the area where people would say it is.
-- **Adding to an area.** Add new spots and facts, update `researchedOn`, and validate the whole repository.
-- **Fixing a fact.** Fix it in place and keep its `id`. If a fact turns out to be wrong, correct it or change its status. Remove it only if there's nothing true left to say.
-- **Removing a spot.** Only when it no longer exists or nothing about it holds up. Never reuse its id for something else.
-- **Changing bounds.** You can widen bounds to add spots. Don't shrink them in a way that leaves existing spots outside.
-
-## 11. Checking your work
-
-Run these from the repository root:
-
-```
-python3 scripts/format.py                # canonical formatting
-python3 scripts/validate.py              # structure, rules, and style, across every area
-python3 scripts/validate.py --online     # also re-fetches every coordinate from Wikidata or OSM
-python3 scripts/stats.py london          # a summary to review against the targets
-```
-
-The validator fails on anything that would break the app or the rules above: missing or unknown fields, bad ids, duplicates across areas, spots outside their bounds, oversized bounds, text that is too long or too short, em dashes, British spellings, banned phrases, missing or Wikipedia-only sources, formatting, and coordinates that don't match their source. It warns about softer problems: repeated stock phrases, missing local names, spots that sound like whole areas, a legend leading a spot, and spots very close to each other. Fix every error and read every warning.
-
-Then do the human review, because the validator can't tell whether something is true or interesting. For every fact:
-
-1. Does the source actually say this? Open it and check.
-2. Is the status honest? Would a skeptical reader call this a legend?
-3. Would a friend say "wait, really?" If not, cut it.
-4. Does the short version make sense on its own?
-5. Does it read fresh, or does it sound like the fact before it?
-
-For the area as a whole:
-
-1. Is at least half of it ordinary places, not landmarks?
-2. Are the stations, hotels, pubs, and famous places people come for covered?
-3. Would someone who lives there recognize their neighborhood in it?
-
-Finally, publish (section 12), build and run the app, and look at a sample of spots on the map and in the feed. Check that pins sit on the right building.
-
-## 12. Committing and publishing
-
-### Committing
-
-This repository uses Conventional Commits without a scope, one small change per commit:
-
-- A new area: `feat: add Soho`.
-- More places in an existing area: `feat: add 8 places to Greenwich`.
-- A correction: `fix: correct the Monument's height`, `fix: mark the Horse Guards clock story as a legend`.
-- Guide changes are `docs:`; tooling is `feat:` or `fix:`; formatting-only changes are `style:`.
+| `person_or_group` | Charles Dickens, The Beatles, East India Company |
+| `event` | The Blitz, Great Fire of London, Festival of Britain |
+| `era` | Roman Britain, Swinging Sixties |
+| `movement` | Art Deco, Brutalism, Women's suffrage |
+| `theme` | Lost rivers, Ghost stations, Pubs, Film locations |
 
 Rules:
 
-- One area per commit. Never mix content with tooling or guide changes.
-- Commit only files that pass `format.py --check` and `validate.py`. Run `sh scripts/install-hooks.sh` once after cloning, and a pre-commit hook enforces this for you.
-- Never commit one-off working files: sweep results, plans, notes, or scratch scripts. `candidates/`, `plans/`, and `tmp/` are ignored for that; anything else goes in `/tmp`.
-- No co-author lines in commit messages.
+- **Reuse first.** Look before you add: `uv run psst tags search "beatles"` matches names and aliases. `uv run psst tags list` shows everything, most used first.
+- **Adding a tag:** find its Wikidata item (`uv run psst tags wikidata "Festival of Britain"`), then
+  ```
+  uv run psst tags propose "Festival of Britain" --type event --wikidata Q1316963 --alias "1951 Festival"
+  ```
+  It prints the tag id. If the name, an alias, or the Wikidata item matches an existing tag, you get that tag instead of a new one. If it's merely similar, nothing is created and you're shown the candidates: use one, or, if yours really is a different thing, repeat with `--distinct-from <id>` for each. Themes often have no Wikidata item; that's fine.
+- **Canonical names** are the common English name with correct spelling and accents ("Simón Bolívar", not "Simon Bolivar"). Other spellings go in as `--alias`.
+- **Tag what the fact is about,** not everything it mentions. Two or three tags is typical; more than four is almost always too many. A fact with no real thread gets no tags.
+- **Only threads that could connect several places.** "Pubs" and "Charles Dickens" will; "This one bus stop" won't.
+- Keep the vocabulary clean: `uv run psst tags audit` lists near-duplicate pairs, and `uv run psst tags merge <from> <into>` folds one into another (all its facts move over, and its name becomes an alias). Merging needs a `tagging` run; after merging, `psst publish --no-new-facts` updates the app.
 
-### Publishing
+## 11. The draft format
+
+A draft is one JSON file for one cell. The schema is `format/draft.schema.json`; `psst draft check` enforces it.
+
+```json
+{
+  "cell": "87194ad14ffffff",
+  "notes": "Covered the river frontage and the stations. The estate to the south had nothing that held up.",
+  "places": [
+    {
+      "name": "Greenwich Foot Tunnel",
+      "kind": "crossing",
+      "size": "medium",
+      "wikidata": "Q935104",
+      "osm": "way/40778038",
+      "facts": [
+        {
+          "category": "history",
+          "veracity": "fact",
+          "headline": "Built so dockers could get to work",
+          "short": "One or two sentences.",
+          "long": "The longer story, 300 to 1,200 characters.",
+          "sources": [
+            { "url": "https://www.royalgreenwich.gov.uk/...", "title": "Greenwich Foot Tunnel", "publisher": "Royal Borough of Greenwich" }
+          ],
+          "tags": ["tg_k13twy63"]
+        }
+      ]
+    },
+    {
+      "place": "pl_kdmsj9y7c8",
+      "facts": [ { "category": "quirk", "veracity": "legend", "...": "..." } ]
+    }
+  ],
+  "skipped": [
+    { "name": "Greenwich Market", "reason": "Everything interesting is already covered by the existing place." }
+  ]
+}
+```
+
+| field | rules |
+| --- | --- |
+| `cell` | The cell you claimed. |
+| `notes` | Optional. What you covered and anything the reviewer or the next researcher should know. |
+| `places` | New places, and new facts for existing places. |
+| `places[].place` | For facts about a place already in Psst: its id (`pl_...`). Nothing else about the place goes in. |
+| `places[].name`, `localName`, `kind`, `size` | For a new place. See section 9. |
+| `places[].wikidata`, `osm` | For a new place: at least one. If you give both, they must be the same thing. |
+| `places[].facts` | 1 to 4 facts, best first. Each has `category`, `veracity`, `headline`, `short`, `long`, `sources` (each with `url`, `title`, `publisher`), and `tags` (tag ids; `[]` for none). |
+| `skipped` | Optional. Leads you looked at and left out, with `name`, `reason`, and optionally `wikidata` or `osm`. |
+
+Ids are assigned by the tools and never change. Nothing else exists in the format; unknown fields are rejected, so a typo can't slip through.
+
+## 12. Reviewing
+
+Review is where Psst stays trustworthy. Assume every draft has a mistake in it until you've failed to find one.
+
+1. Start a review run: `export PSST_RUN=$(uv run psst run start --kind review --model <model>)`. A run can never review its own research.
+2. Get a batch: `uv run psst review next --out work/review.json` (add `--cell <cell>` for one cell, `--limit` for more than 25). Reported facts come first, then drafts. Each item has the fact, its place and pin, its sources and tags, the place's other facts, and any open problem reports.
+3. For every fact, check:
+   - **The source says it.** Open every source. Check each number, name, and date against it. A claim the sources don't make is a rejection, or an edit that removes it.
+   - **The veracity is honest.** One source, or sources repeating each other, means `legend` at most. Would a skeptical historian sign off on `fact`?
+   - **It's surprising.** Would a friend say "wait, really?" If not, reject it.
+   - **The place is right.** The pin (`lat`, `lon`, `location`) is on the thing described, and it's one physical thing, not an area.
+   - **The writing** follows section 7: the short version stands alone, nothing machine-sounding, no repeats of the place's other facts.
+   - **The tags** fit and aren't padded.
+   - **Reports:** read what the reader said and check it properly. They're often right.
+4. Write your decisions to a file, one per fact:
+   ```json
+   [
+     { "fact": "fa_3k9x2m4q7p", "decision": "approve",
+       "notes": "Checked the 1902 date and the architect against the Historic England listing." },
+     { "fact": "fa_8w2n5v1c0r", "decision": "edit",
+       "notes": "The listing says 1898, not 1902. Fixed the year in short and long.",
+       "changes": { "short": "...", "long": "..." } },
+     { "fact": "fa_1q7z4t9y2e", "decision": "reject", "reason": "Neither source mentions the tunnel.",
+       "notes": "Read both sources in full; the tunnel story appears only on a tour company blog." }
+   ]
+   ```
+   - `notes` is required on every decision and says what you checked, in a sentence or more. It's kept in the fact's history.
+   - `edit` can change `category`, `veracity`, `headline`, `short`, `long`, `sources` (the full new list), and `tags` (the full new list), and approves the result. Edits are checked by the same rules as drafts.
+   - `reject` needs a `reason`. The fact is retired, never deleted.
+5. Check, then apply. Nothing is written if any decision has a problem:
+   ```
+   uv run psst review apply work/decisions.json --dry-run
+   uv run psst review apply work/decisions.json
+   ```
+   Approved and edited drafts become `reviewed`. Reported facts that were already published stay published (with your edits) and are marked verified. Any open reports on a fact are resolved with your decision and notes.
+
+`uv run psst reports list` shows open problem reports from the app. They're also in `review next`.
+
+## 13. Publishing
 
 ```
-python3 scripts/publish.py              # into ../psst-map, or set PSST_APP_DIR, or pass --app
-python3 scripts/publish.py --online     # re-check coordinates first
+uv run psst publish
 ```
 
-The app bundles whatever is in its `Content/areas` folder. Publishing validates every area and then syncs that folder: new and changed files are copied and removed areas are deleted. If anything fails validation, nothing is copied. Rebuild the app to see the result. The app's own unit tests also load every published file.
+This one command:
 
-## 13. Regional notes
+1. Exports everything published, plus every reviewed fact, into content format 2 (a manifest and one pack per city; `format/v2/`). The export is deterministic: the same database always gives byte-identical files.
+2. Re-checks every exported fact against the writing rules and every pack against its schema.
+3. Uploads to **staging** and downloads it back exactly as the app would, checking every hash, every reference (places to areas, facts to tags), every old place id, and that the number of places and facts hasn't dropped by more than 2 percent.
+4. Only if all of that passes, promotes staging to **production** by switching one file atomically. Reviewed facts become `published`, and finished cells become `done`.
+
+If any check fails, production is untouched and the problems are listed. Apps keep the last good version they have, and they never switch to a download that doesn't check out.
+
+- `--only-staging`: stop after checking staging.
+- `--allow-shrink "reason"`: allow a drop of more than 2 percent (for example after retiring a batch). The reason is recorded.
+- `--no-new-facts`: re-export what's already published, for example to publish a tag merge.
+- `uv run psst rollback` points production back at the previous version (or `--to <version>`); `uv run psst prune` deletes pack files no recent version needs.
+- `uv run psst bundle` copies what production serves into the app repository (`../psst-map/Content/v2`) as the snapshot the app ships with. Do it before an app release, then rebuild the app.
+- `uv run psst coverage` rebuilds the coverage map at `/coverage/` on the Psst site (user `psst`; the password is in `/www/wwwroot/psst/coverage.password` on the server). It shows every cell by state, with place and fact counts, and where app users asked for places.
+
+## 14. Fixing published content
+
+- **Something is wrong in a published fact:** `uv run psst review flag <fact id> --reason "..."`. It stays live until a review run approves, edits, or rejects it (section 12). Readers' problem reports from the app do the same automatically.
+- **Adding to a place:** research its cell again (`psst research claim --cell <cell>` works on finished cells too) and reference the place by id in the draft.
+- **A place is gone or nothing about it holds up:** reject all its facts in review. A place with no published facts disappears from the app, but its id is never reused, so saved places don't break.
+- **Never edit the database by hand.** Every change goes through a command, so it's attributed to a run and kept in the history.
+
+## 15. Regional notes
 
 ### Mainland China
 
-- Data files always store WGS-84, like everywhere else. Apple Maps draws mainland China in GCJ-02 only when it's using its China map provider, which in practice depends on where the device is. The app checks this at runtime and shifts pins only when needed.
+- Everything is stored in WGS-84, like everywhere else. Apple Maps draws mainland China in GCJ-02 only when it's using its China map provider, which depends on where the device is. The app checks this at runtime and shifts pins only when needed.
 - Apple has no 3D buildings for Chinese cities, so the app shows these places from straight above. Nothing in the content needs to change for this.
-- Wikipedia, Wikimedia, and many Western sites are blocked in mainland China, and some Chinese government sites are hard to reach from outside it. Neither affects the app, which bundles its content, but prefer sources a reader in either place can open.
+- Wikipedia, Wikimedia, and many Western sites are blocked in mainland China, and some Chinese government sites are hard to reach from outside it. Neither affects the app, which downloads content from the Psst server, but prefer sources a reader in either place can open.
+- District and neighborhood boundaries in Shanghai come from OpenStreetMap, where they're far more complete than Who's On First. For a new Chinese city, load its OSM boundaries first (the owner does this; see `docs/DESIGN.md`).
 
 ### Places with other languages and scripts
 
-- Always fill in `localName` when the local name differs from the English one, so people can match the pin to the sign in front of them.
-- Search and read in the local language (and sweep with `--lang`). The best stories about ordinary places are almost never in English.
-- When a place has no common English name, use the romanized local name people would actually see (pinyin for mainland China, the Malay name in Malaysia) rather than inventing a translation.
+- Always fill in `localName` when the local name differs from the English one.
+- Search and read in the local language (the brief already includes the local Wikipedia). The best stories about ordinary places are almost never in English.
+
+### Being a good API citizen
+
+- Requests carry a plain User-Agent, `PsstContent/1.0`. Never put an email address or other personal information in a request.
+- Wikidata, Wikipedia, and Overpass are shared services. The tools retry and fall back on their own (the Wikidata query service when the API refuses, the main OSM API when Overpass is busy). Don't run more than a few researchers at once.
