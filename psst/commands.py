@@ -303,6 +303,12 @@ def status_command(args) -> int:
     print(f"Places: {other['places']}. Facts: " + ", ".join(f"{r['n']} {r['state']}" for r in facts)
           + f". Flagged for review: {flagged['n']}. Open reports: {other['reports']}. Tags: {other['tags']}.")
     print(f"Production serves {other['live'] or 'nothing yet'}.")
+    with db.connect() as conn:
+        from . import research
+        top = research.wanted(conn, 3)
+    if top:
+        names = [f"{r['city'] or 'near %s, %s' % (r['lat'], r['lon'])} ({r['views']} views)" for r in top]
+        print("Most viewed empty areas: " + "; ".join(names) + ". See psst research wanted.")
     by_city: dict[str, list[str]] = {}
     for r in cells:
         by_city.setdefault(r["city"], []).append(f"{r['n']} {r['state']}")
@@ -370,6 +376,29 @@ def research_cells_command(args) -> int:
         print(f"{r['cell']}  {r['state']:<8} {r['city'] or '':<16} {r['places']:>3} places  "
               f"{r['published']:>3} published  {r['pending']:>3} waiting")
     print(f"{len(rows)} cells.")
+    return 0
+
+
+@command("research wanted", "The areas app users looked at most while they were empty (last 90 days).",
+         arg("--limit", type=int, default=20), arg("--json", action="store_true"))
+def research_wanted(args) -> int:
+    from . import research
+    with db.connect() as conn:
+        rows = research.wanted(conn, args.limit)
+    if args.json:
+        print_json(rows)
+        return 0
+    for r in rows:
+        where = r["city"] or (f"no city boundary loaded ({r['country'] or 'unknown country'})")
+        if r["plannedCells"]:
+            plan = f"{r['openCells']} of {r['plannedCells']} cells open"
+        elif r["city"]:
+            plan = f'not planned: psst research plan "{r["city"]}" --country {r["country"]}'
+        else:
+            plan = "not planned: load boundaries for this country first (docs/DESIGN.md)"
+        print(f"{r['cell']}  {r['views']:>5} views  near {r['lat']}, {r['lon']}  {where}  {plan}")
+    if not rows:
+        print("No requests in the last 90 days.")
     return 0
 
 

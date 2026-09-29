@@ -78,6 +78,34 @@ def plan(conn, city: dict) -> dict[str, int]:
     return {"cells": added, "already_done": done}
 
 
+# Demand ------------------------------------------------------------------------------------------------
+
+DEMAND_DAYS = 90
+
+
+def wanted(conn, limit: int = 20) -> list[dict]:
+    """The areas app users looked at most while they were empty, over the last 90 days, with where they
+    are and how much of each is planned for research."""
+    rows = conn.execute("""SELECT cell, sum(count)::int AS views, max(day) AS last_seen FROM demand
+                           WHERE day > current_date - %s GROUP BY cell ORDER BY views DESC, cell LIMIT %s""",
+                        (DEMAND_DAYS, limit)).fetchall()
+    result = []
+    for row in rows:
+        lat, lon = h3.cell_to_latlng(row["cell"])
+        places = conn.execute("""
+            SELECT a.level, a.name, a.country_code FROM admin_area_parts ap JOIN admin_areas a ON a.id = ap.area_id
+            WHERE a.level IN ('country', 'city') AND ST_Intersects(ap.geom, ST_SetSRID(ST_MakePoint(%s, %s), 4326))
+            ORDER BY a.level = 'city' DESC, a.area_km2""", (lon, lat)).fetchall()
+        city = next((p for p in places if p["level"] == "city"), None)
+        country = next((p["country_code"] for p in places if p["country_code"]), None)
+        children = list(h3.cell_to_children(row["cell"], cells.RESEARCH_RESOLUTION))
+        planned = conn.execute("""SELECT count(*) AS cells, count(*) FILTER (WHERE state = 'open') AS open
+                                  FROM research_cells WHERE cell = ANY(%s)""", (children,)).fetchone()
+        result.append({**row, "lat": round(lat, 3), "lon": round(lon, 3), "city": city["name"] if city else None,
+                       "country": country, "plannedCells": planned["cells"], "openCells": planned["open"]})
+    return result
+
+
 # Claiming --------------------------------------------------------------------------------------------
 
 CELL_STATS = """
@@ -111,7 +139,7 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
             raise RuntimeError("No open cells" + (" in that city" if city_id else "") + ". Plan more with "
                                "psst research plan, or name a done cell with --cell to revisit it.")
         demand = {r["cell"]: r["n"] for r in conn.execute(
-            "SELECT cell, sum(count) AS n FROM demand WHERE day > current_date - 90 GROUP BY cell")}
+            "SELECT cell, sum(count) AS n FROM demand WHERE day > current_date - %s GROUP BY cell", (DEMAND_DAYS,))}
         done = {r["cell"] for r in conn.execute("SELECT cell FROM research_cells WHERE state = 'done'")}
 
         def priority(c: str) -> tuple:

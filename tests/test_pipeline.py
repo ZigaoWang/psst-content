@@ -173,3 +173,18 @@ def test_an_empty_cell_is_finished_at_once(scratch, cell):
     research.submit(scratch, draft, researcher, checked)
     row = scratch.execute("SELECT state, notes FROM research_cells WHERE cell = %s", (cell,)).fetchone()
     assert row["state"] == "done" and "car park" in row["notes"]
+
+
+def test_claim_goes_where_people_looked(scratch):
+    import h3
+    open_cells = [r["cell"] for r in scratch.execute("SELECT cell FROM research_cells WHERE state = 'open'")]
+    if len(open_cells) < 2:
+        pytest.skip("not enough open cells")
+    target = open_cells[len(open_cells) // 2]
+    area = h3.cell_to_parent(target, 5)
+    scratch.execute("INSERT INTO demand (cell, day, count) VALUES (%s, current_date, 1000)", (area,))
+    researcher = start(scratch, "research", "test-researcher")
+    claimed = research.claim(scratch, researcher["id"])
+    assert h3.cell_to_parent(claimed["cell"], 5) == area
+    top = research.wanted(scratch, 1)[0]
+    assert top["cell"] == area and top["views"] == 1000 and top["plannedCells"] > 0
