@@ -503,12 +503,15 @@ def sources_check(args) -> int:
 # Review ------------------------------------------------------------------------------------------------
 
 @command("review next", "Write the next facts to review (reported facts first, then drafts) to a file.",
-         arg("--out", required=True), arg("--limit", type=int, default=25), arg("--cell"), RUN_ARG)
+         arg("--out", required=True), arg("--limit", type=int, default=25), arg("--cell"),
+         arg("--city", help="only this city (English name)"),
+         arg("--verify", action="store_true", help="published facts nobody has checked since the migration"),
+         RUN_ARG)
 def review_next(args) -> int:
     from . import review, runs
     with db.connect() as conn:
         runs.require(conn, args.run, "review")
-        rows = review.queue(conn, args.limit, args.cell, args.run)
+        rows = review.queue(conn, args.limit, args.cell, args.run, args.city, args.verify)
         waiting = conn.execute("SELECT count(*) FILTER (WHERE state = 'draft') AS drafts, "
                                "count(*) FILTER (WHERE needs_review AND state <> 'retired') AS flagged FROM facts").fetchone()
     Path(args.out).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
@@ -530,6 +533,17 @@ def review_apply(args) -> int:
             return 0 if report.ok else 1
         counts = review.apply(conn, decisions, run)
     print(f"Approved {counts['approve']}, edited {counts['edit']}, rejected {counts['reject']}.")
+    return 0
+
+
+@command("review progress", "How much of each city's published content a skeptical review has verified.")
+def review_progress(args) -> int:
+    from . import review
+    with db.connect() as conn:
+        rows = review.progress(conn)
+    for r in rows:
+        print(f"{r['city']:<16} written by {r['written_by']:<18} {r['verified']:>5} of {r['facts']:>5} verified"
+              + (f", {r['flagged']} flagged" if r["flagged"] else ""))
     return 0
 
 

@@ -19,9 +19,12 @@ QUEUE = """
                              'otherFacts', (SELECT coalesce(json_agg(o.headline ORDER BY o.position), '[]')
                                             FROM facts o WHERE o.place_id = p.id AND o.id <> f.id
                                               AND o.state <> 'retired')) AS place,
-           (SELECT coalesce(json_agg(json_build_object('url', s.url, 'title', s.title, 'publisher', s.publisher)
+           (SELECT coalesce(json_agg(json_build_object('url', s.url, 'title', s.title, 'publisher', s.publisher,
+                                                       'lastCheck', s.last_check_status, 'failedChecks', s.failed_checks)
                                      ORDER BY fs.position), '[]')
             FROM fact_sources fs JOIN sources s ON s.id = fs.source_id WHERE fs.fact_id = f.id) AS sources,
+           (SELECT e.note FROM fact_events e WHERE e.fact_id = f.id AND 'flagged' = ANY(e.changes)
+            ORDER BY e.id DESC LIMIT 1) AS flagged_because,
            (SELECT coalesce(json_agg(json_build_object('id', t.id, 'name', t.canonical_name) ORDER BY t.canonical_name), '[]')
             FROM fact_tags ft JOIN tags t ON t.id = ft.tag_id WHERE ft.fact_id = f.id) AS tags,
            (SELECT coalesce(json_agg(json_build_object('id', r.id, 'reason', r.reason, 'message', r.message,
@@ -31,17 +34,37 @@ QUEUE = """
     JOIN place_names dn ON dn.place_id = p.id AND dn.role = 'display'
     LEFT JOIN place_names ln ON ln.place_id = p.id AND ln.role = 'local'
     LEFT JOIN admin_areas nb ON nb.id = p.neighborhood_id LEFT JOIN admin_areas ci ON ci.id = p.city_id
-    WHERE (f.state = 'draft' OR (f.needs_review AND f.state IN ('reviewed', 'published')))
+    WHERE CASE WHEN %(verify)s THEN f.state = 'published' AND f.last_verified_at IS NULL AND NOT f.needs_review
+               ELSE f.state = 'draft' OR (f.needs_review AND f.state IN ('reviewed', 'published')) END
       AND (%(cell)s::text IS NULL OR p.h3_cell = %(cell)s)
+      AND (%(city)s::text IS NULL OR ci.name = %(city)s)
       AND (%(run)s::text IS NULL OR f.research_run <> %(run)s)
-    ORDER BY f.needs_review DESC, p.h3_cell, dn.name, f.position
+      AND (%(model)s::text IS NULL OR f.researched_by <> %(model)s)
+    ORDER BY f.needs_review DESC, f.state = 'draft' DESC, nb.name, dn.name, f.position
     LIMIT %(limit)s"""
 
 
-def queue(conn, limit: int, cell: str | None = None, reviewer_run: str | None = None) -> list[dict]:
-    """Facts waiting for review: reported facts first, then drafts, grouped by cell and place.
-    A run never gets its own research to review."""
-    return conn.execute(QUEUE, {"cell": cell, "run": reviewer_run, "limit": limit}).fetchall()
+def queue(conn, limit: int, cell: str | None = None, reviewer_run: str | None = None, city: str | None = None,
+          verify: bool = False) -> list[dict]:
+    """Facts waiting for review: reported and flagged facts first, then drafts, grouped by neighborhood and
+    place. With `verify`, published facts nobody has checked since they were migrated. A run never gets
+    its own research, or anything written by its own model."""
+    model = None
+    if reviewer_run:
+        row = conn.execute("SELECT model FROM pipeline_runs WHERE id = %s", (reviewer_run,)).fetchone()
+        model = row and row["model"]
+    return conn.execute(QUEUE, {"cell": cell, "city": city, "run": reviewer_run, "model": model,
+                                "verify": verify, "limit": limit}).fetchall()
+
+
+def progress(conn) -> list[dict]:
+    """How much of each city's published content has been verified by a skeptical review."""
+    return conn.execute("""
+        SELECT coalesce(ci.name, '(no city)') AS city, f.researched_by AS written_by,
+               count(*) AS facts, count(f.last_verified_at) AS verified,
+               count(*) FILTER (WHERE f.needs_review) AS flagged
+        FROM facts f JOIN places p ON p.id = f.place_id LEFT JOIN admin_areas ci ON ci.id = p.city_id
+        WHERE f.state = 'published' GROUP BY 1, 2 ORDER BY 1, 2""").fetchall()
 
 
 def check(conn, decisions: list[dict], run: dict) -> rules.Report:
@@ -72,10 +95,13 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
         if fact_id in seen:
             report.error(where, "decided twice")
         seen.add(fact_id)
-        if not (fact["state"] == "draft" or fact["needs_review"]):
+        unverified = fact["state"] == "published" and fact["last_verified_at"] is None
+        if not (fact["state"] == "draft" or fact["needs_review"] or unverified):
             report.error(where, f"is {fact['state']} and not flagged; nothing to review")
         if fact["research_run"] == run["id"]:
             report.error(where, "a run can't review its own research")
+        if run["model"] and run["model"] == fact["researched_by"]:
+            report.error(where, f"was written by {run['model']}; a different model has to review it")
         choice = decision.get("decision")
         if choice not in DECISIONS:
             report.error(where, f"decision must be one of {', '.join(DECISIONS)}")
