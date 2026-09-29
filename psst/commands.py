@@ -249,6 +249,58 @@ def tags_apply(args) -> int:
     return 0
 
 
+# Overview --------------------------------------------------------------------------------------------
+
+@command("status", "What's in the database: facts by state, cells by state, open reports, tags.")
+def status_command(args) -> int:
+    with db.connect() as conn:
+        facts = conn.execute("SELECT state, count(*) AS n FROM facts GROUP BY state ORDER BY state").fetchall()
+        flagged = conn.execute("SELECT count(*) AS n FROM facts WHERE needs_review AND state <> 'retired'").fetchone()
+        cells = conn.execute("""SELECT coalesce(ci.name, '(no city)') AS city, rc.state, count(*) AS n
+                                FROM research_cells rc LEFT JOIN admin_areas ci ON ci.id = rc.city_id
+                                GROUP BY 1, 2 ORDER BY 1, 2""").fetchall()
+        other = conn.execute("""SELECT (SELECT count(*) FROM places WHERE state = 'active') AS places,
+                                       (SELECT count(*) FROM reports WHERE state = 'open') AS reports,
+                                       (SELECT count(*) FROM tags) AS tags,
+                                       (SELECT content_version FROM publications WHERE channel = 'production'
+                                        ORDER BY id DESC LIMIT 1) AS live""").fetchone()
+    print(f"Places: {other['places']}. Facts: " + ", ".join(f"{r['n']} {r['state']}" for r in facts)
+          + f". Flagged for review: {flagged['n']}. Open reports: {other['reports']}. Tags: {other['tags']}.")
+    print(f"Production serves {other['live'] or 'nothing yet'}.")
+    by_city: dict[str, list[str]] = {}
+    for r in cells:
+        by_city.setdefault(r["city"], []).append(f"{r['n']} {r['state']}")
+    for city, parts in by_city.items():
+        print(f"  {city}: " + ", ".join(parts))
+    return 0
+
+
+@command("places search", "Find places by name in any language, to check something isn't already in Psst.",
+         arg("text"), arg("--json", action="store_true"))
+def places_search(args) -> int:
+    with db.connect() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT ON (p.id) p.id, dn.name, n.name AS matched, p.wikidata_id, p.osm_ref, p.h3_cell AS cell,
+                   ci.name AS city, similarity(lower(n.name), lower(%(q)s)) AS score
+            FROM place_names n JOIN places p ON p.id = n.place_id AND p.state = 'active'
+            JOIN place_names dn ON dn.place_id = p.id AND dn.role = 'display'
+            LEFT JOIN admin_areas ci ON ci.id = p.city_id
+            WHERE lower(n.name) %% lower(%(q)s) OR n.name ILIKE '%%' || %(q)s || '%%'
+               OR p.wikidata_id = %(q)s OR p.osm_ref = %(q)s
+            ORDER BY p.id, score DESC""", {"q": args.text}).fetchall()
+    rows.sort(key=lambda r: -r["score"])
+    if args.json:
+        print_json(rows[:20])
+        return 0
+    for r in rows[:20]:
+        also = f" (as {r['matched']})" if r["matched"] != r["name"] else ""
+        refs = " ".join(x for x in (r["wikidata_id"], r["osm_ref"]) if x)
+        print(f"{r['id']}  {r['name']}{also}  {r['city'] or ''}  {refs}  cell {r['cell']}")
+    if not rows:
+        print("Nothing found.")
+    return 0
+
+
 # Research ----------------------------------------------------------------------------------------------
 
 WORK = ROOT / "work"
