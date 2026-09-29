@@ -48,20 +48,33 @@ const cellsLayer = L.geoJSON(data.cells, {
       (p.notes ? `<br><i>${p.notes.replace(/</g, "&lt;")}</i>` : ""));
   }
 }).addTo(map);
+// Heat: how often each empty area was looked at, on a log scale so one busy area doesn't wash out the rest.
+const heatColors = ["#fee391", "#fec44f", "#fe9929", "#ec7014", "#cc4c02", "#8c2d04"];
+const maxViews = Math.max(1, ...data.demand.features.map(f => f.properties.count));
+const heatColor = n => heatColors[Math.min(heatColors.length - 1,
+  Math.floor(Math.log(n) / Math.log(maxViews + 1) * heatColors.length))];
 const demandLayer = L.geoJSON(data.demand, {
-  style: f => ({ color: "#d3221b", weight: 2, dashArray: "4 4", fillOpacity: Math.min(0.05 + f.properties.count / 200, 0.4) }),
-  onEachFeature: (f, layer) => layer.bindPopup(`${f.properties.count} requests in the last 90 days`)
-});
-L.control.layers(null, { "Research cells": cellsLayer, "Requested areas": demandLayer }).addTo(map);
+  style: f => ({ color: heatColor(f.properties.count), weight: 1, fillColor: heatColor(f.properties.count), fillOpacity: 0.4 }),
+  onEachFeature: (f, layer) => layer.bindPopup(`<b>${f.properties.count} views</b> while empty, last 90 days<br>` +
+    `${f.properties.plannedCells ? f.properties.openCells + " of " + f.properties.plannedCells + " research cells open" : "Not planned for research"}` +
+    `<br>${f.properties.cell}`)
+}).addTo(map);
+L.control.layers(null, { "Research cells": cellsLayer, "Empty areas people looked at": demandLayer }).addTo(map);
 const legend = L.control({ position: "bottomleft" });
 legend.onAdd = () => {
   const div = L.DomUtil.create("div", "panel");
   div.innerHTML = `<h1>Psst coverage</h1><table>` +
     Object.entries(data.totals).map(([state, n]) =>
       `<tr><td><span class="swatch" style="background:${colors[state]}"></span>${state}</td><td>${n} cells</td></tr>`).join("") +
-    `</table><div style="margin-top:6px">${data.places} places, ${data.facts} published facts. Updated ${data.generatedAt}.</div>` +
-    `<div class="cities">` + data.cities.map((c, i) => `<a data-i="${i}">${c.name} (${c.cells})</a>`).join("") + `</div>`;
-  div.querySelectorAll(".cities a").forEach(a => a.onclick = () => show(data.cities[a.dataset.i]));
+    `</table>` +
+    (data.demand.features.length ? `<div style="margin-top:6px">Empty areas people looked at: ` +
+      heatColors.map(c => `<span class="swatch" style="background:${c};margin-right:1px"></span>`).join("") +
+      ` up to ${maxViews} views</div>` : "") +
+    `<div style="margin-top:6px">${data.places} places, ${data.facts} published facts. Updated ${data.generatedAt}.</div>` +
+    `<div class="cities">` + data.cities.map((c, i) => `<a data-i="${i}">${c.name} (${c.cells})</a>`).join("") +
+    (data.demand.features.length ? `<a data-demand="1">Most viewed empty areas</a>` : "") + `</div>`;
+  div.querySelectorAll(".cities a[data-i]").forEach(a => a.onclick = () => show(data.cities[a.dataset.i]));
+  div.querySelectorAll(".cities a[data-demand]").forEach(a => a.onclick = () => map.fitBounds(demandLayer.getBounds(), { maxZoom: 8 }));
   L.DomEvent.disableClickPropagation(div);
   return div;
 };
@@ -84,8 +97,14 @@ def build(conn) -> str:
         LEFT JOIN places p ON p.h3_cell = rc.cell AND p.state = 'active'
         LEFT JOIN facts f ON f.place_id = p.id
         GROUP BY rc.cell, rc.state, rc.notes, ci.name ORDER BY rc.cell""").fetchall()
-    demand = conn.execute("""SELECT cell, sum(count) AS count FROM demand WHERE day > current_date - 90
-                             GROUP BY cell ORDER BY cell""").fetchall()
+    demand = conn.execute("""SELECT d.cell, sum(d.count) AS count FROM demand d WHERE d.day > current_date - 90
+                             GROUP BY d.cell ORDER BY d.cell""").fetchall()
+    planned = {}
+    for d in demand:
+        if h3.is_valid_cell(d["cell"]):
+            children = list(h3.cell_to_children(d["cell"], 7))
+            planned[d["cell"]] = conn.execute("""SELECT count(*) AS cells, count(*) FILTER (WHERE state = 'open') AS open
+                                                 FROM research_cells WHERE cell = ANY(%s)""", (children,)).fetchone()
     totals = conn.execute("""SELECT (SELECT count(*) FROM places WHERE state = 'active'
                                      AND EXISTS (SELECT 1 FROM facts WHERE place_id = places.id AND state = 'published')) AS places,
                                     (SELECT count(*) FROM facts WHERE state = 'published') AS facts,
@@ -111,7 +130,9 @@ def build(conn) -> str:
     data = {
         "cells": {"type": "FeatureCollection", "features": features},
         "demand": {"type": "FeatureCollection", "features": [
-            {"type": "Feature", "geometry": polygon(d["cell"]), "properties": {"count": int(d["count"])}}
+            {"type": "Feature", "geometry": polygon(d["cell"]),
+             "properties": {"cell": d["cell"], "count": int(d["count"]), "plannedCells": planned[d["cell"]]["cells"],
+                            "openCells": planned[d["cell"]]["open"]}}
             for d in demand if h3.is_valid_cell(d["cell"])]},
         "cities": sorted(cities.values(), key=lambda c: -c["cells"]),
         "totals": state_totals, "places": totals["places"], "facts": totals["facts"], "generatedAt": totals["at"],
