@@ -33,6 +33,14 @@ def hierarchy_load_osm(args) -> int:
     return 0
 
 
+@command("hierarchy index", "Split every boundary into small pieces for fast lookups (after loading).")
+def hierarchy_index(args) -> int:
+    from . import hierarchy
+    with db.connect(actor="hierarchy") as conn:
+        print(f"Indexed {hierarchy.index_parts(conn)} boundaries.")
+    return 0
+
+
 @command("hierarchy names", "Name boundaries in use from their Wikidata labels.")
 def hierarchy_names(args) -> int:
     from . import hierarchy

@@ -40,6 +40,14 @@ NEAREST_NEIGHBORHOOD_METERS = 1500
 OSM_LEVELS = {"CN": {6: "district", 8: "neighborhood"}}
 PREFERRED_SOURCE = {"CN": {"district": "osm", "neighborhood": "osm"}}
 
+# Known errors in the boundary data, never used for assignment. Each needs a reason.
+EXCLUDED_AREAS = {
+    1158894067: "Who's On First files the River Thames as a London neighbourhood.",
+}
+
+# Suffixes that only say what kind of division an area is, dropped from English names.
+NAME_SUFFIXES = (" Subdistrict", " subdistrict", " Sub-district", " sub-district", " Residential District")
+
 
 def bcp47(language: str, script: str | None, region: str | None) -> str | None:
     base = LANGUAGES.get(language)
@@ -106,6 +114,8 @@ def load_wof(conn, path: Path, country: str) -> int:
         cur.execute("""UPDATE admin_areas SET area_km2 = CASE WHEN is_point THEN 0
                            ELSE ST_Area(geom::geography) / 1e6 END
                        WHERE country_code = %s AND source = 'wof'""", (country,))
+        index_parts(conn, [r["id"] for r in cur.execute(
+            "SELECT id FROM s_wof WHERE id IN (SELECT id FROM admin_areas)").fetchall()])
         cur.execute("DELETE FROM admin_area_names WHERE area_id IN (SELECT id FROM s_wof)")
         cur.execute("""INSERT INTO admin_area_names (area_id, lang, name)
                        SELECT s.id, n.key, n.value FROM s_wof s JOIN admin_areas a ON a.id = s.id,
@@ -123,7 +133,7 @@ def load_osm(conn, bounds: tuple[float, float, float, float], country: str) -> i
     south, west, north, east = bounds
     pattern = "|".join(str(level) for level in levels)
     payload = net.overpass(f'[out:json][timeout:300];relation["boundary"="administrative"]'
-                           f'["admin_level"~"^({pattern})$"]({south},{west},{north},{east});out geom tags;')
+                           f'["admin_level"~"^({pattern})$"]({south},{west},{north},{east});out geom;')
     count = 0
     with conn.cursor() as cur:
         cur.execute("CREATE TEMP TABLE s_osm_lines (id bigint, wkt text) ON COMMIT DROP")
@@ -166,29 +176,77 @@ def load_osm(conn, bounds: tuple[float, float, float, float], country: str) -> i
             ) g ON g.geom IS NOT NULL AND NOT ST_IsEmpty(g.geom)
             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, level = EXCLUDED.level, geom = EXCLUDED.geom,
                 area_km2 = EXCLUDED.area_km2, wikidata_id = EXCLUDED.wikidata_id""", {"country": country})
+        stored = cur.rowcount
+        if count and not stored:
+            raise RuntimeError(f"None of the {count} OpenStreetMap boundaries formed a polygon")
+        index_parts(conn, [r["id"] for r in cur.execute(
+            "SELECT id FROM s_osm WHERE id IN (SELECT id FROM admin_areas)").fetchall()])
         cur.execute("DELETE FROM admin_area_names WHERE area_id IN (SELECT id FROM s_osm)")
         cur.execute("""INSERT INTO admin_area_names (area_id, lang, name)
                        SELECT s.id, n.key, n.value FROM s_osm s JOIN admin_areas a ON a.id = s.id,
                               jsonb_each_text(s.names) n WHERE n.key <> 'und'""")
-    return count
+    return stored
+
+
+def clean_name(name: str) -> str:
+    for suffix in NAME_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)].strip()
+    return name
+
+
+def romanize(name: str) -> str:
+    """Hanyu Pinyin without tones, written as one word the way place names are (静安寺街道 -> Jing'ansi).
+    Transliteration, not translation: used only when no source has an English name."""
+    from pypinyin import lazy_pinyin
+    for suffix in ("街道", "镇", "乡"):
+        if name.endswith(suffix) and len(name) > len(suffix):
+            name = name[: -len(suffix)]
+    syllables = [s for s in lazy_pinyin(name) if s.strip()]
+    word = ""
+    for index, syllable in enumerate(syllables):
+        if index and syllable[0] in "aoe":
+            word += "'"
+        word += syllable
+    return word[:1].upper() + word[1:]
 
 
 def english_names_from_wikidata(conn) -> int:
-    """Areas that places use and that link to Wikidata take its English label and other labels, which
-    are usually the names people know (Lujiazui rather than Lu Jia Zui)."""
+    """Name the boundaries places use from Wikidata, found through the boundary's own link or through
+    Wikidata's OpenStreetMap relation id (P402). Those are usually the names people know (Lujiazui
+    rather than Lu Jia Zui). Division words are dropped, and Chinese-only names are romanized."""
     from . import names as place_names
     from . import net
     areas = conn.execute("""
-        SELECT a.id, a.wikidata_id FROM admin_areas a
-        WHERE a.wikidata_id IS NOT NULL AND a.id IN (
-            SELECT unnest(ARRAY[region_id, city_id, district_id, neighborhood_id]) FROM places WHERE state = 'active')
+        SELECT a.id, a.name, a.source, a.wikidata_id,
+               (SELECT name FROM admin_area_names WHERE area_id = a.id AND lang = 'zh-Hans') AS chinese
+        FROM admin_areas a
+        WHERE a.id IN (SELECT unnest(ARRAY[region_id, city_id, district_id, neighborhood_id])
+                       FROM places WHERE state = 'active')
     """).fetchall()
-    entities = net.wikidata_entities(sorted({a["wikidata_id"] for a in areas}), props="labels")
+    missing = [a for a in areas if not a["wikidata_id"] and a["source"] == "osm"]
+    if missing:
+        values = " ".join(f'"{-a["id"]}"' for a in missing)
+        query = f"SELECT ?item ?rel WHERE {{ VALUES ?rel {{ {values} }} ?item wdt:P402 ?rel . }}"
+        payload = net.fetch_json("https://query.wikidata.org/sparql?format=json&query="
+                                 + __import__("urllib.parse").parse.quote(query))
+        for row in payload["results"]["bindings"]:
+            qid = row["item"]["value"].rsplit("/", 1)[-1]
+            area_id = -int(row["rel"]["value"])
+            conn.execute("UPDATE admin_areas SET wikidata_id = %s WHERE id = %s", (qid, area_id))
+            for a in areas:
+                if a["id"] == area_id:
+                    a["wikidata_id"] = qid
+    entities = net.wikidata_entities(sorted({a["wikidata_id"] for a in areas if a["wikidata_id"]}), props="labels")
     updated = 0
     for area in areas:
-        labels = entities.get(area["wikidata_id"], {}).get("labels", {})
-        if "en" in labels:
-            conn.execute("UPDATE admin_areas SET name = %s WHERE id = %s", (labels["en"]["value"], area["id"]))
+        labels = entities.get(area["wikidata_id"] or "", {}).get("labels", {})
+        name = labels.get("en", {}).get("value") or area["name"]
+        if place_names.HAN.search(name):
+            name = romanize(name)
+        name = clean_name(name)
+        if name != area["name"]:
+            conn.execute("UPDATE admin_areas SET name = %s WHERE id = %s", (name, area["id"]))
             updated += 1
         for lang, codes in place_names.WIKIDATA_LANGUAGES.items():
             for code in codes:
@@ -204,34 +262,44 @@ ASSIGN = """
 WITH target AS (
     SELECT id, geom, country_code FROM places WHERE state = 'active' AND (%(only)s::text[] IS NULL OR id = ANY(%(only)s))
 ),
-polygon AS (
-    SELECT t.id AS place_id, lvl.level,
-           (SELECT a.id FROM admin_areas a
-            WHERE a.level = lvl.level AND NOT a.is_point AND ST_Contains(a.geom, t.geom)
-            ORDER BY (a.source = coalesce(%(preferred)s::jsonb -> t.country_code ->> lvl.level, 'wof')) DESC,
-                     a.area_km2 ASC LIMIT 1) AS area_id
-    FROM target t CROSS JOIN (VALUES ('country'), ('region'), ('city'), ('district'), ('neighborhood')) lvl(level)
+-- Every boundary piece under each place, found through the spatial index first.
+hits AS MATERIALIZED (
+    SELECT t.id AS place_id, t.country_code, a.id AS area_id, a.level, a.source, a.area_km2
+    FROM target t
+    JOIN admin_area_parts ap ON ap.geom && t.geom AND ST_Intersects(ap.geom, t.geom)
+    JOIN admin_areas a ON a.id = ap.area_id
+    WHERE a.id <> ALL(%(excluded)s)
+),
+-- Per level: the preferred source first, then the smallest area.
+ranked AS (
+    SELECT DISTINCT ON (place_id, level) place_id, level, area_id
+    FROM hits
+    ORDER BY place_id, level,
+             (source = coalesce(%(preferred)s::jsonb -> country_code ->> level, 'wof')) DESC, area_km2 ASC
 ),
 chosen AS (
-    SELECT place_id,
-           max(area_id) FILTER (WHERE level = 'country') AS country_id,
-           max(area_id) FILTER (WHERE level = 'region') AS region_id,
-           max(area_id) FILTER (WHERE level = 'city') AS city_id,
-           max(area_id) FILTER (WHERE level = 'district') AS district_id,
-           max(area_id) FILTER (WHERE level = 'neighborhood') AS neighborhood_id
-    FROM polygon GROUP BY place_id
+    SELECT t.id AS place_id,
+           max(r.area_id) FILTER (WHERE r.level = 'country') AS country_id,
+           max(r.area_id) FILTER (WHERE r.level = 'region') AS region_id,
+           max(r.area_id) FILTER (WHERE r.level = 'city') AS city_id,
+           max(r.area_id) FILTER (WHERE r.level = 'district') AS district_id,
+           max(r.area_id) FILTER (WHERE r.level = 'neighborhood') AS neighborhood_id
+    FROM target t LEFT JOIN ranked r ON r.place_id = t.id
+    GROUP BY t.id
 ),
--- No boundary contains the place: take the nearest neighborhood point that belongs to the same city.
+-- No neighborhood contains the place (a bridge, a riverbank, or a neighborhood known only as a point):
+-- take the nearest neighborhood in the same city within reach, measured to its edge or point.
 nearest AS (
     SELECT c.place_id, n.id AS area_id, n.distance
-    FROM chosen c JOIN target t ON t.id = c.place_id
+    FROM chosen c JOIN target t ON t.id = c.place_id JOIN admin_areas ci ON ci.id = c.city_id
     CROSS JOIN LATERAL (
         SELECT a.id, ST_Distance(a.geom::geography, t.geom::geography) AS distance
         FROM admin_areas a
-        WHERE a.level = 'neighborhood' AND a.is_point AND c.city_id IS NOT NULL AND a.parent_id = c.city_id
+        WHERE a.level = 'neighborhood' AND a.id <> ALL(%(excluded)s)
           AND a.geom && ST_Expand(t.geom, 0.03)
+          AND (a.parent_id = c.city_id OR ST_Intersects(ST_PointOnSurface(a.geom), ci.geom))
           AND ST_DWithin(a.geom::geography, t.geom::geography, %(nearest)s)
-        ORDER BY a.geom <-> t.geom LIMIT 1
+        ORDER BY ST_Distance(a.geom, t.geom) LIMIT 1
     ) n
     WHERE c.neighborhood_id IS NULL
 )
@@ -239,14 +307,17 @@ UPDATE places p SET
     country_code = coalesce(upper(ca.country_code), p.country_code),
     region_id = c.region_id,
     city_id = c.city_id,
-    -- A district named like its city (Kuala Lumpur in Kuala Lumpur), or covering nearly all of it, adds nothing.
-    district_id = CASE WHEN da.name = ci.name OR da.area_km2 >= 0.9 * ci.area_km2 THEN NULL
+    -- A district named like its city (Kuala Lumpur in Kuala Lumpur), or one that is really the whole city
+    -- (at least 90 percent of its area and containing its center), adds nothing.
+    district_id = CASE WHEN da.name = ci.name
+                            OR (da.area_km2 >= 0.9 * ci.area_km2
+                                AND ST_Covers(da.geom, ST_PointOnSurface(ci.geom))) THEN NULL
                        ELSE c.district_id END,
     neighborhood_id = coalesce(c.neighborhood_id, n.area_id),
     admin_assignment = jsonb_build_object(
         'rule', 'smallest containing boundary per level',
         'neighborhood', CASE WHEN c.neighborhood_id IS NOT NULL THEN 'boundary'
-                             WHEN n.area_id IS NOT NULL THEN 'nearest point, ' || round(n.distance) || ' m'
+                             WHEN n.area_id IS NOT NULL THEN 'nearest, ' || round(n.distance) || ' m away'
                              ELSE 'none' END,
         'assignedAt', now())
 FROM chosen c
@@ -261,5 +332,6 @@ WHERE p.id = c.place_id
 def assign(conn, only: list[str] | None = None) -> int:
     """Fill in every level for the given places (or all active places). Returns how many were updated."""
     cur = conn.execute(ASSIGN, {"only": only, "nearest": NEAREST_NEIGHBORHOOD_METERS,
-                                "preferred": json.dumps(PREFERRED_SOURCE)})
+                                "preferred": json.dumps(PREFERRED_SOURCE),
+                                "excluded": list(EXCLUDED_AREAS)})
     return cur.rowcount
