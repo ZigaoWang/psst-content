@@ -275,8 +275,8 @@ Rules:
 - **Read sources with `uv run psst fetch <url>`.** It prints the page as plain text. When a site refuses scripts (Historic England, Londonist, and many newspapers do) or the page is gone, it reads the newest Internet Archive copy instead and says so. Cite the original URL either way. `--archive` goes straight to the archived copy; `--max` shows more of a long page. Use it instead of any built-in web page tool, which many of these sites block. To find sources, never guess URLs:
 
 - **A Wikipedia article's citations:** `uv run psst fetch https://en.wikipedia.org/wiki/<Article> --links` lists every link on the page with its address, including the sources it cites. Cite those, not Wikipedia.
-- **Identifiers on Wikidata:** an item often links straight to an official record (a heritage listing, a museum page).
-- **Web search:** use your own web search tool if you have one. Search pages don't work through `psst fetch`; they refuse scripts. For a listed building in England, its Wikidata item gives the Historic England list entry number (property P1216), which leads to the listing and its British Listed Buildings copy.
+- **Identifiers on Wikidata:** an item often links straight to an official record (a heritage listing, a museum page). For a listed building in England, its Wikidata item gives the Historic England list entry number (property P1216), which leads to the listing and its British Listed Buildings copy.
+- **Web search:** use your own web search tool if you have one. Search pages don't work through `psst fetch`; they refuse scripts.
 
 Sources are stored once and shared: cite the same page from two facts and it's one source linked twice. Give it the same title and publisher each time.
 
