@@ -19,6 +19,26 @@ def hierarchy_load_wof(args) -> int:
     return 0
 
 
+@command("hierarchy load-osm", "Load OpenStreetMap administrative boundaries inside a box (see OSM_LEVELS).",
+         arg("--bounds", required=True, help="south,west,north,east"),
+         arg("--country", required=True, help="ISO country code, e.g. CN"))
+def hierarchy_load_osm(args) -> int:
+    from . import hierarchy
+    bounds = tuple(float(x) for x in args.bounds.split(","))
+    with db.connect(actor="hierarchy") as conn:
+        count = hierarchy.load_osm(conn, bounds, args.country.upper())
+    print(f"Loaded {count} {args.country.upper()} OpenStreetMap boundaries.")
+    return 0
+
+
+@command("hierarchy names", "Name boundaries in use from their Wikidata labels.")
+def hierarchy_names(args) -> int:
+    from . import hierarchy
+    with db.connect(actor="hierarchy") as conn:
+        print(f"Renamed {hierarchy.english_names_from_wikidata(conn)} boundaries from Wikidata.")
+    return 0
+
+
 @command("hierarchy assign", "Assign country, region, city, district, and neighborhood to every place.")
 def hierarchy_assign(args) -> int:
     from . import hierarchy
