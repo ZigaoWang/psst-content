@@ -22,8 +22,8 @@ Default: 3 cells, one after another, in the city named.
 1. `uv run psst city list`. If the city isn't there, set it up: `uv run psst city add "<City>" --country <ISO code>`. If it says the name wasn't found, pick the right one from the close matches it lists (the official name, like "Kuala Lumpur" or "Hong Kong").
 2. Start one research run for the session: `export PSST_RUN=$(uv run psst run start --kind research --model <your model id> --notes "<what you were asked>")`.
 3. For each cell:
-   - Claim one: `uv run psst research claim --city "<City>"`. If they named an area ("around the Bund"), find its coordinates (Wikidata, or a place already in Psst via `uv run psst places search`) and add `--near <lat>,<lon>`.
-   - Research it exactly as the guide says (section 5): account for every lead in the brief, add what the sweep can't see, write, tag, check, fix, submit.
+   - Claim one: `uv run psst research claim --city "<City>"`. In a dense cell this takes a few minutes (it sweeps Wikipedia and OpenStreetMap), so give the command up to 10 minutes. If they named an area ("around the Bund"), find its coordinates (Wikidata, or a place already in Psst via `uv run psst places search`) and add `--near <lat>,<lon>`.
+   - Research it exactly as the guide says (section 5): account for every lead in the brief, add what the sweep can't see, write, tag, check, fix, submit. Read every source with `uv run psst fetch <url>` (guide, section 8): it gets past sites that refuse scripts by reading their Internet Archive copy.
    - If the cell is too big to do well in what's left of your session, submit what's finished and leave the remaining leads with `"later": true`. Never rush facts to finish a cell.
 4. `uv run psst run finish $PSST_RUN`.
 5. Report per cell: the neighborhoods, places added, facts written, leads skipped, and leads left for later. Don't review or publish your own drafts.
@@ -54,6 +54,7 @@ Run `uv run psst status`, `uv run psst city list`, `uv run psst research wanted`
 Keep going on your own where you safely can:
 
 - **A claim fails because someone else has the cell:** claim again; it picks another.
+- **A source won't open:** use `uv run psst fetch <url>`, which falls back to the Internet Archive. If there's no copy either, find another source that says the same thing; if there isn't one, leave the claim out.
 - **Wikipedia, Wikidata, or OpenStreetMap are slow or refusing:** the tools retry by themselves. If a lookup keeps failing, wait a minute and try again. If one place's coordinates still can't be found, skip it with the reason "coordinates unavailable" and move on.
 - **`draft check` reports errors:** fix the draft and check again. Never change the tools, the rules, or the database to make something pass.
 - **Nothing in a cell clears the bar:** submit a draft with no places and every lead skipped with a reason. That's a valid result.
