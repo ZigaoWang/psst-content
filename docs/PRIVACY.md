@@ -8,7 +8,7 @@ whenever the app starts sending anything new.
 
 | Data type (App Store Connect) | Collected? | Linked to the user? | Used for tracking? | Purpose |
 | --- | --- | --- | --- | --- |
-| Location > Coarse Location | Yes: the H3 resolution 5 cell (about 250 km²) of a map area with no stories, only if "Help choose new areas" is on | No | No | Analytics (deciding where to research next) |
+| Location > Coarse Location | Yes: the center of a map area with no stories, rounded to 0.1° (about 10 km), only if "Help choose new areas" is on. The server stores only a daily count per H3 resolution 5 cell (about 250 km²). | No | No | Analytics (deciding where to research next) |
 | User Content > Other User Content | Yes: the optional message in a problem report | No | No | App Functionality (fixing content) |
 | Usage Data > Other Usage Data | Yes: which story a problem report is about, and the reason | No | No | App Functionality |
 | Diagnostics, Identifiers, Contact Info, and everything else | No | | | |

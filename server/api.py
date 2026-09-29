@@ -1,7 +1,7 @@
 """The Psst API: two endpoints, both write-only and anonymous.
 
     POST /api/v1/reports  {"factId": "fa_...", "reason": "wrong", "message": "...", "appVersion": "1.1 (7)"}
-    POST /api/v1/demand   {"cell": "85195da7fffffff"}
+    POST /api/v1/demand   {"lat": "51.5", "lon": "-0.1"}   (rounded by the app to a tenth of a degree)
 
 It runs behind nginx (which rate limits and caps request size) on 127.0.0.1:8787, connects as the
 psst_api role, and can only call psst.submit_report and psst.record_demand. It stores no IP addresses
@@ -17,11 +17,12 @@ import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import h3
 import psycopg
 
 REASONS = {"wrong", "outdated", "location", "offensive", "other"}
 FACT_ID = re.compile(r"^fa_[0-9a-hjkmnp-tv-z]{10}$")
-CELL = re.compile(r"^[0-9a-f]{15}$")
+DEMAND_RESOLUTION = 5  # hexagons of about 250 km²; nothing finer is ever stored
 MAX_BODY = 4096
 
 log = logging.getLogger("psst-api")
@@ -96,9 +97,13 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(204)
 
     def _demand(self, body: dict):
-        cell = body.get("cell")
-        if not isinstance(cell, str) or not CELL.match(cell):
-            return self._reply(400, {"error": "cell is required"})
+        try:
+            lat, lon = float(body.get("lat")), float(body.get("lon"))
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._reply(400, {"error": "lat and lon are required"})
+        cell = h3.latlng_to_cell(round(lat, 1), round(lon, 1), DEMAND_RESOLUTION)
         connection().execute("SELECT psst.record_demand(%s)", (cell,))
         self._reply(204)
 
