@@ -178,9 +178,9 @@ The text export keeps only the boundaries places and research cells use, with th
    - Each spot became a place with an id derived from its old `areaId/spotId`, plus a legacy id row. Its facts became published facts with provenance: the date from git history, the model that wrote them (`claude-opus-5-5` before the London seeding began, `claude-sonnet-5-5` after), a `legacy-import` run, and `reviewed_by = legacy-validator`.
    - Sources were deduplicated by normalized URL. No two spots turned out to be the same place.
 3. Multilingual names were fetched from Wikidata and OSM, every place got its city and neighborhood, and every fact was read by a tagging pass (four parallel runs, then one cleanup run for merges and renames).
-4. `tests/test_migration.py` proves nothing was lost or changed. It compares the database and what production serves against the area files at the `legacy-areas` git tag: every place, coordinate, fact text, source link, and old id.
+4. `tests/test_migration.py` proves nothing was lost or changed. It compares the database and what production serves against the area files at the `legacy-areas` tag of the private `psst-content-archive` repository: every place, coordinate, fact text, source link, and old id.
 5. The result was published through staging and bundled into the app, which rewrites old saved place ids on first launch.
-6. `areas/` and the old scripts were removed. They remain in git history at `legacy-areas`.
+6. `areas/` and the old scripts were removed. This repository's history was then rewritten without the area files so the code could be public; the full history, stories included, is kept in the private `psst-content-archive` repository.
 
 ## Why this, and not something else
 
