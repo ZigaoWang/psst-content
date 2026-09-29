@@ -323,7 +323,7 @@ Rules:
 - **Canonical names** are the common English name with correct spelling and accents ("Simón Bolívar", not "Simon Bolivar"). Other spellings go in as `--alias`.
 - **Tag what the fact is about,** not everything it mentions. Two or three tags is typical; more than four is almost always too many. A fact with no real thread gets no tags.
 - **Only threads that could connect several places.** "Pubs" and "Charles Dickens" will; "This one bus stop" won't.
-- Keep the vocabulary clean: `uv run psst tags audit` lists near-duplicate pairs, and `uv run psst tags merge <from> <into>` folds one into another (all its facts move over, and its name becomes an alias). `uv run psst tags rename <id> "New name"` fixes a canonical name (the old one stays as an alias), and `uv run psst tags alias <id> "Other name" [--remove]` adds or frees an alias. These need a `tagging` run; after merging, `psst publish --no-new-facts` updates the app.
+- Keep the vocabulary clean: `uv run psst tags audit` lists near-duplicate pairs, and `uv run psst tags merge <from> <into>` folds one into another (all its facts move over, and its name becomes an alias). `uv run psst tags rename <id> "New name"` fixes a canonical name (the old one stays as an alias), and `uv run psst tags alias <id> "Other name" [--remove]` adds or frees an alias, and `uv run psst tags retype <id> <type>` fixes a type. These need a `tagging` run; after merging, `psst publish --no-new-facts` updates the app.
 
 ## 11. The draft format
 

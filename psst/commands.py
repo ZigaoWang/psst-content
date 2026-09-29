@@ -210,6 +210,20 @@ def tags_rename(args) -> int:
     return 0
 
 
+@command("tags retype", "Change a tag's type.", arg("tag"),
+         arg("type", help="person_or_group, event, era, theme, or movement"), RUN_ARG)
+def tags_retype(args) -> int:
+    from . import runs, tags
+    if args.type not in tags.TYPES:
+        raise RuntimeError(f"type must be one of {', '.join(tags.TYPES)}")
+    with db.connect(actor="tags") as conn:
+        runs.require(conn, args.run, "tagging")
+        if not conn.execute("UPDATE tags SET type = %s WHERE id = %s RETURNING id", (args.type, args.tag)).fetchone():
+            raise RuntimeError(f"No tag {args.tag}")
+    print(f"{args.tag} is now a {args.type} tag.")
+    return 0
+
+
 @command("tags alias", "Add or remove another way of writing a tag.",
          arg("tag"), arg("alias"), arg("--remove", action="store_true"), RUN_ARG)
 def tags_alias(args) -> int:
