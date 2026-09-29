@@ -1,7 +1,7 @@
 """The Psst API: two endpoints, both write-only and anonymous.
 
     POST /api/v1/reports  {"factId": "fa_...", "reason": "wrong", "message": "...", "appVersion": "1.1 (7)"}
-    POST /api/v1/demand   {"lat": "51.5", "lon": "-0.1"}   (rounded by the app to a tenth of a degree)
+    POST /api/v1/demand   {"cell": "85194ad3fffffff"}   (an H3 resolution 5 cell of an empty map view)
 
 It runs behind nginx (which rate limits and caps request size) on 127.0.0.1:8787, connects as the
 psst_api role, and can only call psst.submit_report and psst.record_demand. It stores no IP addresses
@@ -97,13 +97,11 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(204)
 
     def _demand(self, body: dict):
-        try:
-            lat, lon = float(body.get("lat")), float(body.get("lon"))
-            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-                raise ValueError
-        except (TypeError, ValueError):
-            return self._reply(400, {"error": "lat and lon are required"})
-        cell = h3.latlng_to_cell(round(lat, 1), round(lon, 1), DEMAND_RESOLUTION)
+        # Only a coarse cell id is accepted. Anything else, coordinates included, is refused unread.
+        cell = body.get("cell")
+        if set(body) != {"cell"} or not isinstance(cell, str) or not h3.is_valid_cell(cell) \
+                or h3.get_resolution(cell) != DEMAND_RESOLUTION:
+            return self._reply(400, {"error": f"send only a resolution {DEMAND_RESOLUTION} cell id"})
         connection().execute("SELECT psst.record_demand(%s)", (cell,))
         self._reply(204)
 
