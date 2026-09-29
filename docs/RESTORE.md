@@ -9,19 +9,33 @@ plain static files. What a restore brings back is the ability to research, revie
 | Copy | Where | Kept | Has |
 | --- | --- | --- | --- |
 | Nightly dump | `/www/wwwroot/psst/backup/dumps/psst-<time>.dump` on the VPS | 14 days | The whole database, including every boundary, but not `admin_area_parts` (an index `psst hierarchy index` rebuilds) |
-| Nightly text backup | The private GitHub repository `ZigaoWang/psst-db-backup` | Forever (git history) | Every table as a sorted CSV. Boundaries: only the ones places and research cells use, with their parents |
+| Nightly text backup | The private GitHub repository `ZigaoWang/psst-db-backup` | Forever (git history) | Every table as a sorted CSV. Boundaries: only the ones places and research cells use, with their parents; countries and regions as bounding boxes |
 
 Both run at 03:17 UTC from `/etc/cron.d/psst-backup` (`server/backup.sh`) and log to
 `/var/log/psst-backup.log`. Every Sunday at 04:47 UTC, `psst backup test` restores the latest text backup
-into a scratch database, exports it again, and checks every table matches byte for byte. Look for
-"Restore test passed" in the log. The VPS pushes to GitHub with its own deploy key (SSH host alias
-`github-psst-backup` in `/root/.ssh/config`), which can write to that one repository and nothing else.
+into a scratch database, exports it again, and checks every table matches byte for byte. The result is
+written to `/www/wwwroot/psst/backup/restore-test.status`. The VPS pushes to GitHub with its own deploy key
+(SSH host alias `github-psst-backup` in `/root/.ssh/config`), which can write to that one repository and
+nothing else.
+
+## Alerts
+
+Each night's backup also writes `STATUS` in the backup repository: when it ran, file sizes, free disk space,
+and the last restore test result. The "Check backup" workflow in that repository reads it every morning at
+07:00 UTC and after every push, and fails when:
+
+- the last backup is more than 30 hours old (the backup failed, or the server is down);
+- the weekly restore test failed, or hasn't passed in 8 days;
+- a backup file is over 50 MB (GitHub refuses 100 MB; the backup stops at 90 MB and keeps the last good copy), or the repository is over 900 MB;
+- the server has less than 5 GB free for dumps.
+
+When the workflow fails, GitHub emails the repository owner. Its log says which check failed and where to look.
 
 To run either by hand, as root on the VPS:
 
 ```
 /usr/local/bin/psst-backup
-cd /www/wwwroot/psst/app && PSST_CONFIG=/www/wwwroot/psst/.env /root/.local/bin/uv run --no-dev psst backup test
+/usr/local/bin/psst-restore-test
 ```
 
 ## Case 1: the VPS is fine, the data is wrong
@@ -76,7 +90,8 @@ Rebuild from the GitHub text backup. On a fresh Ubuntu 22.04 server with the `bw
    sudo -u postgres psql -c "DROP DATABASE psst" -c "ALTER DATABASE psst_restored RENAME TO psst"
    ```
    To restore an earlier day, `git -C /tmp/psst-db-backup checkout <commit>` first; each commit is one night.
-   The restore loads with every foreign key checked, so if it finishes, the data is consistent.
+   The restore recreates the schema the backup was taken with (its `SCHEMA_VERSION`), loads the data with
+   every foreign key checked, then applies any newer migrations. If it finishes, the data is consistent.
 5. Reload the full boundaries (the text backup only has the ones in use), then index them:
    ```
    mkdir -p /www/wwwroot/psst/wof && cd /www/wwwroot/psst/wof
@@ -87,7 +102,8 @@ Rebuild from the GitHub text backup. On a fresh Ubuntu 22.04 server with the `bw
    PSST_CONFIG=/www/wwwroot/psst/.env /root/.local/bin/uv run --no-dev psst hierarchy index
    ```
    Add a `load-wof` line for every country Psst covers by then (`SELECT DISTINCT country_code FROM psst.places`).
-   Places keep the areas they were assigned; the reload only matters for places added from now on.
+   Places keep the areas they were assigned. The reload puts back the full country and region shapes (the
+   backup keeps them as bounding boxes) and matters for places added from now on.
 6. `sh server/setup.sh` (nginx, TLS, the API, the backup cron), then point DNS at the new server.
 7. Put the content back: from your Mac, `psst publish --no-new-facts`. Export is deterministic, so this
    rebuilds exactly what production served. Apps that already have that version download nothing.

@@ -34,6 +34,7 @@ systemctl enable --now psst-api.service
 systemctl restart psst-api.service
 
 install -m 755 server/backup.sh /usr/local/bin/psst-backup
+install -m 755 server/restore-test.sh /usr/local/bin/psst-restore-test
 install -m 644 server/psst-backup.cron /etc/cron.d/psst-backup
 
 # TLS first over plain HTTP, then the full config.
