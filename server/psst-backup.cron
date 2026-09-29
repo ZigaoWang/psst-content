@@ -1,2 +1,4 @@
 # Psst nightly database backup (see server/backup.sh). 03:17 UTC, logged to /var/log/psst-backup.log.
 17 3 * * * root /usr/local/bin/psst-backup >> /var/log/psst-backup.log 2>&1
+# Every Sunday, restore the latest backup into a scratch database and check it matches (docs/RESTORE.md).
+47 4 * * 0 root cd /www/wwwroot/psst/app && PSST_CONFIG=/www/wwwroot/psst/.env LC_ALL=C.UTF-8 /root/.local/bin/uv run --no-dev psst backup test >> /var/log/psst-backup.log 2>&1
