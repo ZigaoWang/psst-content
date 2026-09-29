@@ -162,6 +162,7 @@ Each place has 1 to 4 facts. One excellent fact is enough for a place to exist. 
 
 - The best you can say is that it's old, tall, popular, or designed by someone famous.
 - The only interesting thing is a generic superlative ("one of the busiest stations in Europe").
+- The story is true of every example of its kind (every K6 phone box, every Victorian pub) and nothing about this one is different.
 - You can't find a solid source for the surprising part.
 - Going there would send people somewhere they shouldn't be: private homes, restricted sites, dangerous places. Public exteriors of private buildings are fine.
 - It would point at a private living person who isn't a public figure, or at the home of a recent crime victim. Places tied to tragedies are fine when the story is historical and written with respect.
@@ -206,6 +207,8 @@ If you're not sure whether something is a fact, it isn't a `fact`. Be especially
 - `headline`: a few plain words naming the secret, up to 60 characters. Not a pun, not clickbait, no question marks. Example: "A second roundabout underneath".
 - `short`: the whisper. One or two sentences, up to 220 characters. It's what shows on the feed card and the map card, so it must stand on its own with no context. Lead with the surprising part.
 - `long`: the story for people who want more, 300 to 1,200 characters. Add context, the how and why, names and dates, and, for legends and disputes, what the evidence says. Don't repeat the short version with more adjectives.
+
+The headline, short, and long must agree on every detail: a headline that says "bronze" over a story that says "copper" is a mistake a reader will catch.
 
 Put a place's best fact first. It's the one shown on the feed card. Prefer a plain `fact` as the lead; lead with a legend only when it's clearly the best story, since the card then carries a "Legend" label.
 
