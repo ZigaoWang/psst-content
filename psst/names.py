@@ -23,8 +23,14 @@ WIKIDATA_LANGUAGES = {
     "uk": ["uk"], "fa": ["fa"], "bn": ["bn"], "ur": ["ur"],
 }
 OSM_LANGUAGES = {"zh-Hans": ["name:zh-Hans", "name:zh"], "zh-Hant": ["name:zh-Hant"]}
-COUNTRY_LANGUAGE = {"GB": "en", "CN": "zh-Hans", "MY": "ms", "HK": "zh-Hant", "TW": "zh-Hant", "JP": "ja",
-                    "KR": "ko", "FR": "fr", "DE": "de", "ES": "es", "IT": "it"}
+# The language of street signs, for countries with one main language. Countries with several (Singapore,
+# Switzerland, India) are left out, so no local name is guessed there.
+COUNTRY_LANGUAGE = {"GB": "en", "IE": "en", "US": "en", "AU": "en", "NZ": "en", "CN": "zh-Hans", "HK": "zh-Hant",
+                    "TW": "zh-Hant", "MO": "zh-Hant", "JP": "ja", "KR": "ko", "MY": "ms", "ID": "id", "TH": "th",
+                    "VN": "vi", "FR": "fr", "DE": "de", "AT": "de", "ES": "es", "MX": "es", "AR": "es", "IT": "it",
+                    "PT": "pt", "BR": "pt", "NL": "nl", "PL": "pl", "SE": "sv", "RU": "ru", "UA": "uk", "TR": "tr",
+                    "GR": "el", "IL": "he", "IR": "fa"}
+CJK = re.compile(r"[㐀-鿿぀-ヿ가-힯]")
 HAN = re.compile(r"[㐀-鿿]")
 
 
@@ -82,8 +88,9 @@ def collect(places: list[dict]) -> tuple[list[tuple], list[tuple], list[str]]:
         local_lang = COUNTRY_LANGUAGE.get(country)
         if not p["local"] and local_lang and local_lang != "en":
             candidate = names.get(local_lang)
-            if not candidate and tags.get("name") and HAN.search(tags["name"]) \
-                    and language_of_local(tags["name"], country) == local_lang:
+            # (In Hong Kong the plain name is often Chinese and English together; that doesn't count.)
+            if not candidate and tags.get("name") and CJK.search(tags["name"]) \
+                    and not re.search(r"[A-Za-z]", tags["name"]) and language_of_local(tags["name"], country) == local_lang:
                 candidate = (tags["name"], "osm")
             if candidate and not _same(candidate[0], p["display"]):
                 rows.append((p["id"], "local", local_lang, candidate[0], candidate[1]))
