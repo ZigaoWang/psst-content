@@ -27,6 +27,7 @@ PAGE = """<!doctype html>
   .panel h1 { font-size: 15px; margin: 0 0 6px; }
   .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
   table { border-collapse: collapse; } td { padding: 1px 8px 1px 0; }
+  .cities a { display: inline-block; margin: 6px 8px 0 0; color: #0067b1; cursor: pointer; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -58,11 +59,15 @@ legend.onAdd = () => {
   div.innerHTML = `<h1>Psst coverage</h1><table>` +
     Object.entries(data.totals).map(([state, n]) =>
       `<tr><td><span class="swatch" style="background:${colors[state]}"></span>${state}</td><td>${n} cells</td></tr>`).join("") +
-    `</table><div style="margin-top:6px">${data.places} places, ${data.facts} published facts. Updated ${data.generatedAt}.</div>`;
+    `</table><div style="margin-top:6px">${data.places} places, ${data.facts} published facts. Updated ${data.generatedAt}.</div>` +
+    `<div class="cities">` + data.cities.map((c, i) => `<a data-i="${i}">${c.name} (${c.cells})</a>`).join("") + `</div>`;
+  div.querySelectorAll(".cities a").forEach(a => a.onclick = () => show(data.cities[a.dataset.i]));
+  L.DomEvent.disableClickPropagation(div);
   return div;
 };
 legend.addTo(map);
-if (data.cells.features.length) map.fitBounds(cellsLayer.getBounds()); else map.setView([30, 0], 2);
+function show(city) { map.fitBounds([[city.south, city.west], [city.north, city.east]]); }
+if (data.cities.length) show(data.cities[0]); else map.setView([30, 0], 2);
 </script>
 </body>
 </html>
@@ -92,8 +97,15 @@ def build(conn) -> str:
 
     state_totals = {state: 0 for state in COLORS}
     features = []
+    cities: dict[str, dict] = {}
     for r in rows:
         state_totals[r["state"]] += 1
+        lats, lngs = zip(*h3.cell_to_boundary(r["cell"]))
+        c = cities.setdefault(r["city"] or "Other", {"name": r["city"] or "Other", "cells": 0, "south": 90, "west": 180,
+                                                     "north": -90, "east": -180})
+        c["cells"] += 1
+        c["south"], c["north"] = min(c["south"], *lats), max(c["north"], *lats)
+        c["west"], c["east"] = min(c["west"], *lngs), max(c["east"], *lngs)
         features.append({"type": "Feature", "geometry": polygon(r["cell"]),
                          "properties": {k: r[k] for k in ("cell", "state", "city", "places", "published", "pending", "notes")}})
     data = {
@@ -101,6 +113,7 @@ def build(conn) -> str:
         "demand": {"type": "FeatureCollection", "features": [
             {"type": "Feature", "geometry": polygon(d["cell"]), "properties": {"count": int(d["count"])}}
             for d in demand if h3.is_valid_cell(d["cell"])]},
+        "cities": sorted(cities.values(), key=lambda c: -c["cells"]),
         "totals": state_totals, "places": totals["places"], "facts": totals["facts"], "generatedAt": totals["at"],
     }
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
