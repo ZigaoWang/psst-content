@@ -252,3 +252,27 @@ def test_a_second_pass_keeps_earlier_decisions(scratch, cell):
     scratch.execute("UPDATE research_leads SET status = 'skipped', reason = 'Nothing holds up.' WHERE key = 'Q999999995'")
     research.store_leads(scratch, cell, [lead], researcher["id"])
     assert research.open_leads(scratch, cell) == []
+
+
+def test_leads_left_for_later_keep_the_cell_open(scratch, cell, tag_id):
+    researcher = start(scratch, "research", "test-researcher")
+    research.claim(scratch, researcher["id"], cell=cell)
+    research.store_leads(scratch, cell, [{"key": "Q999999999", "name": "Test Bench", "wikidata": "Q999999999", "known": False},
+                                         {"key": "Q999999994", "name": "Big Tower", "wikidata": "Q999999994", "known": False}],
+                         researcher["id"])
+    draft = draft_for(cell, tag_id)
+    draft["skipped"] = [{"name": "Big Tower", "reason": "Not reached in this pass.", "later": True}]
+    checked = research.check(scratch, draft, online=False)
+    assert checked.report.ok, checked.report.errors
+    checked.positions = {0: position_in(cell)}
+    counts = research.submit(scratch, draft, researcher, checked)
+    assert counts["leads_left"] == 1
+    assert scratch.execute("SELECT state FROM research_cells WHERE cell = %s", (cell,)).fetchone()["state"] == "open"
+    assert [l["name"] for l in research.open_leads(scratch, cell)] == ["Big Tower"]
+
+
+def test_claim_near_a_spot(scratch):
+    import h3
+    target = scratch.execute("SELECT cell FROM research_cells WHERE state = 'open' ORDER BY cell DESC LIMIT 1").fetchone()["cell"]
+    researcher = start(scratch, "research", "test-researcher")
+    assert research.claim(scratch, researcher["id"], near=h3.cell_to_latlng(target))["cell"] == target

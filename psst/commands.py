@@ -465,13 +465,15 @@ def research_wanted(args) -> int:
 @command("research claim", "Claim a cell for a research run and write its brief to work/<cell>/.",
          arg("--cell", help="a specific cell (default: the most wanted open cell)"),
          arg("--city", help="pick from this city (English name)"), arg("--country"),
+         arg("--near", metavar="LAT,LON", help="the open cell closest to this point, for a particular area"),
          arg("--no-sweep", action="store_true", help="skip the Wikipedia and OpenStreetMap leads"), RUN_ARG)
 def research_claim(args) -> int:
     from . import research, runs
     with db.connect(actor="research", run=args.run) as conn:
         runs.require(conn, args.run, "research")
         city_id = research.find_city(conn, args.city, args.country)["id"] if args.city else None
-        cell = research.claim(conn, args.run, args.cell, city_id)
+        near = tuple(float(x) for x in args.near.split(",")) if args.near else None
+        cell = research.claim(conn, args.run, args.cell, city_id, near)
     print(f"Claimed {cell['cell']} ({cell['city']}) until {cell['claimed_until']:%Y-%m-%d %H:%M %Z}. "
           f"It has {cell['places']} places and {cell['published']} published facts.")
     with db.connect() as conn:
@@ -539,7 +541,8 @@ def draft_submit(args) -> int:
     for warning in checked.report.warnings:
         print(f"  warning  {warning}")
     print(f"Stored {counts['places']} new places, {counts['facts']} draft facts, {counts['sources']} new sources "
-          f"for {draft['cell']}.")
+          f"for {draft['cell']}." + (f" {counts['leads_left']} leads left for the next pass; the cell stays open."
+                                      if counts["leads_left"] else ""))
     if counts["new_place_ids"]:
         try:
             with db.connect(actor="names") as conn:

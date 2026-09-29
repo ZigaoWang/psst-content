@@ -27,7 +27,7 @@
     },
     "skipped": {
       "type": "array",
-      "description": "Leads from the brief that were looked at and left out, with why. Every lead must be added, already in Psst, or listed here. One reason can cover several leads with `names`.",
+      "description": "Leads from the brief that were looked at and left out, with why. Every lead must be added, already in Psst, or listed here. One reason can cover several leads with `names`. Leads not reached in this pass go here with `later: true`, which keeps the cell open for another pass.",
       "items": {
         "type": "object",
         "required": [
@@ -78,6 +78,10 @@
           "osm": {
             "type": "string",
             "pattern": "^(node|way|relation)/[1-9][0-9]*$"
+          },
+          "later": {
+            "type": "boolean",
+            "description": "Not reached in this pass: the lead stays open and the cell stays open for another pass. Use `reason` to say so."
           }
         }
       }

@@ -12,7 +12,7 @@ import h3
 REMOTE_DIR = "/www/wwwroot/psst/public/coverage"
 
 COLORS = {"open": "#9e9e9e", "claimed": "#f2a900", "drafted": "#0067b1", "reviewed": "#7a1f5c", "done": "#00783a"}
-LABELS = {"open": "Not researched yet", "claimed": "Being researched now", "drafted": "Researched, waiting for review",
+LABELS = {"open": "Open for research", "claimed": "Being researched now", "drafted": "Researched, waiting for review",
           "reviewed": "Reviewed, waiting to be published", "done": "Finished and published"}
 
 PAGE = """<!doctype html>

@@ -114,7 +114,8 @@ CELL_STATS = """
     FROM research_cells rc LEFT JOIN admin_areas ci ON ci.id = rc.city_id"""
 
 
-def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None) -> dict:
+def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None,
+          near: tuple[float, float] | None = None) -> dict:
     """Claim a cell for research. With no cell given, the most wanted open cell: most requested by app
     users first, then the one touching the most finished cells, so coverage grows outward evenly."""
     if cell:
@@ -145,7 +146,12 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
             parent = h3.cell_to_parent(c, cells.DEMAND_RESOLUTION)
             return (-demand.get(parent, 0), -existing.get(c, 0), -sum(n in done for n in cells.neighbors(c)), c)
 
-        cell = min((r["cell"] for r in open_cells), key=priority)
+        if near:
+            # The open cell closest to a spot the person asked for ("focus on the Bund").
+            cell = min((r["cell"] for r in open_cells),
+                       key=lambda c: h3.great_circle_distance(h3.cell_to_latlng(c), near))
+        else:
+            cell = min((r["cell"] for r in open_cells), key=priority)
     conn.execute("""UPDATE research_cells SET state = 'claimed', claimed_by_run = %s,
                     claimed_until = now() + make_interval(hours => %s) WHERE cell = %s""",
                  (run_id, CLAIM_HOURS, cell))
@@ -299,10 +305,11 @@ def account_for_leads(conn, draft: dict, positions: dict) -> tuple[dict[str, tup
     known = {r for row in conn.execute("SELECT wikidata_id, osm_ref FROM places WHERE h3_cell = ANY(%s) AND state = 'active'",
                                        (nearby,)) for r in (row["wikidata_id"], row["osm_ref"]) if r}
     skipped: dict[str, str] = {}
+    later: set[str] = set()
     for item in draft.get("skipped", []):
         for label in [item.get("name")] + item.get("names", []) + [item.get("wikidata"), item.get("osm")]:
             if label:
-                skipped[label.casefold()] = item["reason"]
+                (later.add if item.get("later") else lambda x: skipped.__setitem__(x, item["reason"]))(label.casefold())
     added_names = {p["name"].casefold() for p in draft["places"] if p.get("name")}
     covered: dict[str, tuple[str, str | None]] = {}
     missing = []
@@ -314,6 +321,8 @@ def account_for_leads(conn, draft: dict, positions: dict) -> tuple[dict[str, tup
             covered[lead["key"]] = ("known", None)
         elif reason := next((skipped[x.casefold()] for x in [lead["name"], lead["key"], *ids] if x.casefold() in skipped), None):
             covered[lead["key"]] = ("skipped", reason)
+        elif any(x.casefold() in later for x in [lead["name"], lead["key"], *ids]):
+            covered[lead["key"]] = ("later", None)
         else:
             missing.append(lead)
     return covered, missing
@@ -538,12 +547,21 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
             for s in draft["skipped"])
     covered, _ = account_for_leads(conn, draft, checked.positions)
     for key, (status, reason) in covered.items():
-        conn.execute("UPDATE research_leads SET status = %s, reason = %s, run_id = %s WHERE cell = %s AND key = %s",
-                     (status, reason, run["id"], draft["cell"], key))
-    # A cell with nothing worth adding is finished; otherwise it waits for review.
+        if status != "later":
+            conn.execute("UPDATE research_leads SET status = %s, reason = %s, run_id = %s WHERE cell = %s AND key = %s",
+                         (status, reason, run["id"], draft["cell"], key))
+    left = sum(1 for status, _ in covered.values() if status == "later")
+    if left:
+        # A partial pass: its drafts go to review as usual, and the cell is open again for the rest.
+        state = "open"
+        notes += ("\n" if notes else "") + f"{left} leads left for the next pass."
+    else:
+        # A cell with nothing worth adding is finished; otherwise it waits for review.
+        state = "drafted" if counts["facts"] else "done"
     conn.execute("""UPDATE research_cells SET state = %s, claimed_by_run = NULL, claimed_until = NULL, passes = passes + 1,
                     last_researched_at = now(), notes = nullif(%s, '') WHERE cell = %s""",
-                 ("drafted" if counts["facts"] else "done", notes, draft["cell"]))
+                 (state, notes, draft["cell"]))
+    counts["leads_left"] = left
     counts["new_place_ids"] = new_place_ids
     return counts
 
