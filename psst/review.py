@@ -40,21 +40,23 @@ QUEUE = """
       AND (%(city)s::text IS NULL OR ci.name = %(city)s)
       AND (%(run)s::text IS NULL OR f.research_run <> %(run)s)
       AND (%(model)s::text IS NULL OR f.researched_by <> %(model)s)
-    ORDER BY f.needs_review DESC, f.state = 'draft' DESC, nb.name, dn.name, f.position
+    ORDER BY CASE WHEN %(sample)s THEN random() END, f.needs_review DESC, f.state = 'draft' DESC, nb.name, dn.name,
+             f.position
     LIMIT %(limit)s"""
 
 
 def queue(conn, limit: int, cell: str | None = None, reviewer_run: str | None = None, city: str | None = None,
-          verify: bool = False) -> list[dict]:
+          verify: bool = False, sample: bool = False) -> list[dict]:
     """Facts waiting for review: reported and flagged facts first, then drafts, grouped by neighborhood and
     place. With `verify`, published facts nobody has checked since they were migrated. A run never gets
-    its own research, or anything written by its own model."""
+    its own research, or anything written by its own model. With `sample`, a random selection instead,
+    to estimate how accurate a batch of content is without checking all of it."""
     model = None
     if reviewer_run:
         row = conn.execute("SELECT model FROM pipeline_runs WHERE id = %s", (reviewer_run,)).fetchone()
         model = row and row["model"]
     return conn.execute(QUEUE, {"cell": cell, "city": city, "run": reviewer_run, "model": model,
-                                "verify": verify, "limit": limit}).fetchall()
+                                "verify": verify, "sample": sample, "limit": limit}).fetchall()
 
 
 def progress(conn) -> list[dict]:

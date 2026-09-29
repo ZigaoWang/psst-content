@@ -520,12 +520,13 @@ def sources_check(args) -> int:
          arg("--out", required=True), arg("--limit", type=int, default=25), arg("--cell"),
          arg("--city", help="only this city (English name)"),
          arg("--verify", action="store_true", help="published facts nobody has checked since the migration"),
+         arg("--sample", action="store_true", help="a random selection, to estimate accuracy cheaply"),
          RUN_ARG)
 def review_next(args) -> int:
     from . import review, runs
     with db.connect() as conn:
         runs.require(conn, args.run, "review")
-        rows = review.queue(conn, args.limit, args.cell, args.run, args.city, args.verify)
+        rows = review.queue(conn, args.limit, args.cell, args.run, args.city, args.verify, args.sample)
         waiting = conn.execute("SELECT count(*) FILTER (WHERE state = 'draft') AS drafts, "
                                "count(*) FILTER (WHERE needs_review AND state <> 'retired') AS flagged FROM facts").fetchone()
     Path(args.out).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")

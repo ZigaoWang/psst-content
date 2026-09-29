@@ -214,3 +214,10 @@ def test_local_names_must_be_in_the_countrys_language(scratch):
     assert research.local_name_problem(scratch, {"lang": "ms", "name": "Menara Berkembar Petronas"}, petronas) is None
     peace_hotel = coords.Position(31.2405, 121.4903, "wikidata", "Q377875")
     assert research.local_name_problem(scratch, {"lang": "zh-Hans", "name": "和平饭店"}, peace_hotel) is None
+
+
+def test_samples_are_random(scratch):
+    reviewer = start(scratch, "review", "some-other-model")
+    first = [r["id"] for r in review.queue(scratch, 30, reviewer_run=reviewer["id"], verify=True, sample=True)]
+    second = [r["id"] for r in review.queue(scratch, 30, reviewer_run=reviewer["id"], verify=True, sample=True)]
+    assert len(first) == 30 and first != second
