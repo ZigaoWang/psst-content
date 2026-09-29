@@ -485,6 +485,21 @@ def draft_submit(args) -> int:
     return 0
 
 
+@command("sources check", "Check every cited link, and flag facts whose sources failed twice in a row.",
+         arg("--limit", type=int, help="only check this many sources (for trying it out)"))
+def sources_check(args) -> int:
+    from . import links
+    with db.connect() as conn:
+        sources = links.live_sources(conn, args.limit)
+    print(f"Checking {len(sources)} sources...")
+    results = links.check(sources)
+    with db.connect(actor="link-check") as conn:
+        counts = links.record(conn, results)
+    print(f"{counts['ok']} fine, {counts['failed']} failed, {counts['blocked']} refused the check. "
+          f"Flagged {counts['flagged']} facts for review.")
+    return 0
+
+
 # Review ------------------------------------------------------------------------------------------------
 
 @command("review next", "Write the next facts to review (reported facts first, then drafts) to a file.",
