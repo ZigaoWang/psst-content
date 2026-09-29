@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://psst.zigao.wang/format/v2/common.schema.json",
+  "title": "Psst common pack, format 2",
+  "description": "Cities, the districts and neighborhoods places refer to, published tags, and old ids.",
+  "type": "object",
+  "required": ["formatVersion", "cities", "areas", "tags", "legacyIds"],
+  "properties": {
+    "formatVersion": {"const": 2},
+    "cities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "countryCode", "bounds", "placeCount"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string", "minLength": 1},
+          "names": {"$ref": "#/$defs/names"},
+          "countryCode": {"type": "string", "pattern": "^[A-Z]{2}$"},
+          "bounds": {"$ref": "#/$defs/bounds"},
+          "placeCount": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "areas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "level", "name", "cityId"],
+        "properties": {
+          "id": {"type": "string"},
+          "level": {"type": "string"},
+          "name": {"type": "string", "minLength": 1},
+          "names": {"$ref": "#/$defs/names"},
+          "cityId": {"type": "string"}
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type", "placeCount"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^tg_[0-9a-hjkmnp-tv-z]{8}$"},
+          "name": {"type": "string", "minLength": 1},
+          "type": {"type": "string"},
+          "wikidataId": {"type": ["string", "null"]},
+          "names": {"$ref": "#/$defs/names"},
+          "aliases": {"type": "array", "items": {"type": "string"}},
+          "placeCount": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "legacyIds": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "pattern": "^pl_[0-9a-hjkmnp-tv-z]{10}$"}
+    }
+  },
+  "$defs": {
+    "names": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "bounds": {
+      "type": "object",
+      "required": ["south", "west", "north", "east"],
+      "properties": {
+        "south": {"type": "number"}, "west": {"type": "number"},
+        "north": {"type": "number"}, "east": {"type": "number"}
+      }
+    }
+  }
+}

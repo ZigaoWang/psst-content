@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://psst.zigao.wang/format/v2/manifest.schema.json",
+  "title": "Psst content manifest, format 2",
+  "description": "The entry point the app downloads first. Pack files are named by content hash and never change; only this file does.",
+  "type": "object",
+  "required": ["formatVersion", "contentVersion", "generatedAt", "common", "cities"],
+  "properties": {
+    "formatVersion": {"const": 2},
+    "contentVersion": {"type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z$"},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "common": {"$ref": "#/$defs/pack"},
+    "cities": {
+      "type": "array",
+      "items": {
+        "allOf": [{"$ref": "#/$defs/pack"}],
+        "required": ["cityId"],
+        "properties": {"cityId": {"type": "string"}}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "properties": {"places": {"type": "integer"}, "facts": {"type": "integer"}}
+    }
+  },
+  "$defs": {
+    "pack": {
+      "type": "object",
+      "required": ["file", "sha256", "bytes"],
+      "properties": {
+        "file": {"type": "string", "pattern": "^packs/[a-z0-9-]+\\.[0-9a-f]{16}\\.json\\.gz$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

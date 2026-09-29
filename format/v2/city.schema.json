@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://psst.zigao.wang/format/v2/city.schema.json",
+  "title": "Psst city pack, format 2",
+  "description": "Every published place in one city, with its published facts. Coordinates are WGS-84.",
+  "type": "object",
+  "required": ["formatVersion", "cityId", "places"],
+  "properties": {
+    "formatVersion": {"const": 2},
+    "cityId": {"type": "string"},
+    "places": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "kind", "size", "lat", "lon", "location", "facts"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^pl_[0-9a-hjkmnp-tv-z]{10}$"},
+          "name": {"type": "string", "minLength": 1},
+          "localName": {
+            "type": ["object", "null"],
+            "required": ["lang", "name"],
+            "properties": {"lang": {"type": "string"}, "name": {"type": "string", "minLength": 1}}
+          },
+          "names": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+          "kind": {"type": "string"},
+          "size": {"enum": ["small", "medium", "large"]},
+          "lat": {"type": "number", "minimum": -90, "maximum": 90},
+          "lon": {"type": "number", "minimum": -180, "maximum": 180},
+          "location": {
+            "type": "object",
+            "required": ["source", "ref", "license"],
+            "properties": {
+              "source": {"enum": ["wikidata", "osm"]},
+              "ref": {"type": "string"},
+              "license": {"enum": ["CC0-1.0", "ODbL-1.0"]}
+            }
+          },
+          "countryCode": {"type": ["string", "null"]},
+          "districtId": {"type": ["string", "null"]},
+          "neighborhoodId": {"type": ["string", "null"]},
+          "facts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "category", "veracity", "headline", "short", "long", "sources"],
+              "properties": {
+                "id": {"type": "string", "pattern": "^fa_[0-9a-hjkmnp-tv-z]{10}$"},
+                "category": {"type": "string"},
+                "veracity": {"enum": ["fact", "legend", "disputed"]},
+                "headline": {"type": "string", "minLength": 1, "maxLength": 60},
+                "short": {"type": "string", "minLength": 1, "maxLength": 220},
+                "long": {"type": "string", "minLength": 300, "maxLength": 1200},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "researchedOn": {"type": ["string", "null"]},
+                "lastVerified": {"type": ["string", "null"]},
+                "sources": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": ["title", "publisher", "url"],
+                    "properties": {
+                      "title": {"type": "string"},
+                      "publisher": {"type": "string"},
+                      "url": {"type": "string", "pattern": "^https://"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
