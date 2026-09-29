@@ -567,6 +567,16 @@ def sources_check(args) -> int:
     return 0
 
 
+@command("fetch", "Read a web page as plain text, falling back to the Internet Archive when a site refuses.",
+         arg("url"), arg("--max", type=int, default=20000, help="characters to show (default 20000)"),
+         arg("--archive", action="store_true", help="read the newest archived copy directly"))
+def fetch_command(args) -> int:
+    from . import fetch
+    page = fetch.read(args.url, args.archive)
+    print(fetch.render(page, args.max))
+    return 0 if page.text and not page.text.startswith("(Couldn't") else 1
+
+
 # Review ------------------------------------------------------------------------------------------------
 
 @command("review next", "Write the next facts to review (reported facts first, then drafts) to a file.",
