@@ -103,6 +103,38 @@ def _add_aliases(conn, tag_id: str, aliases) -> None:
                          "ON CONFLICT (normalized) DO NOTHING", (key, tag_id, alias.strip()))
 
 
+def rename(conn, tag_id: str, name: str) -> None:
+    """Change a tag's canonical name. The old name stays as an alias, so searches for it still work."""
+    key = normalize(name)
+    if not key:
+        raise ValueError("a tag needs a name")
+    owner = conn.execute("SELECT tag_id FROM tag_labels WHERE normalized = %s", (key,)).fetchone()
+    if owner and owner["tag_id"] != tag_id:
+        raise ValueError(f"{name!r} already belongs to {owner['tag_id']}; merge the tags instead")
+    if not conn.execute("SELECT 1 FROM tags WHERE id = %s", (tag_id,)).fetchone():
+        raise ValueError(f"no tag {tag_id}")
+    conn.execute("UPDATE tag_labels SET is_canonical = false WHERE tag_id = %s", (tag_id,))
+    conn.execute("""INSERT INTO tag_labels (normalized, tag_id, label, is_canonical) VALUES (%s, %s, %s, true)
+                    ON CONFLICT (normalized) DO UPDATE SET label = EXCLUDED.label, is_canonical = true""",
+                 (key, tag_id, name.strip()))
+    conn.execute("UPDATE tags SET canonical_name = %s WHERE id = %s", (name.strip(), tag_id))
+
+
+def add_alias(conn, tag_id: str, alias: str) -> None:
+    owner = conn.execute("SELECT tag_id FROM tag_labels WHERE normalized = %s", (normalize(alias),)).fetchone()
+    if owner and owner["tag_id"] != tag_id:
+        raise ValueError(f"{alias!r} already belongs to {owner['tag_id']}; remove it there first")
+    _add_aliases(conn, tag_id, (alias,))
+
+
+def remove_alias(conn, tag_id: str, alias: str) -> None:
+    """Free an alias, for example so it can become a tag of its own. The canonical name can't be removed."""
+    cur = conn.execute("DELETE FROM tag_labels WHERE tag_id = %s AND normalized = %s AND NOT is_canonical",
+                       (tag_id, normalize(alias)))
+    if not cur.rowcount:
+        raise ValueError(f"{alias!r} is not an alias of {tag_id}")
+
+
 def merge(conn, source: str, target: str) -> None:
     """Fold one tag into another: its facts, labels, and names move over, and it disappears."""
     if source == target:

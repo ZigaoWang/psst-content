@@ -199,6 +199,28 @@ def tags_merge(args) -> int:
     return 0
 
 
+@command("tags rename", "Change a tag's canonical name; the old name stays as an alias.",
+         arg("tag"), arg("name"), RUN_ARG)
+def tags_rename(args) -> int:
+    from . import runs, tags
+    with db.connect(actor="tags") as conn:
+        runs.require(conn, args.run, "tagging")
+        tags.rename(conn, args.tag, args.name)
+    print(f"{args.tag} is now {args.name!r}.")
+    return 0
+
+
+@command("tags alias", "Add or remove another way of writing a tag.",
+         arg("tag"), arg("alias"), arg("--remove", action="store_true"), RUN_ARG)
+def tags_alias(args) -> int:
+    from . import runs, tags
+    with db.connect(actor="tags") as conn:
+        runs.require(conn, args.run, "tagging")
+        (tags.remove_alias if args.remove else tags.add_alias)(conn, args.tag, args.alias)
+    print(f"{'Removed' if args.remove else 'Added'} {args.alias!r} {'from' if args.remove else 'to'} {args.tag}.")
+    return 0
+
+
 @command("tags audit", "List pairs of tags that look like duplicates.")
 def tags_audit(args) -> int:
     from . import tags

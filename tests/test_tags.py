@@ -20,3 +20,23 @@ def test_audit_runs_and_finds_near_duplicates(scratch):
     # ...and near duplicates without that note are listed.
     scratch.execute("UPDATE tags SET description = NULL WHERE id = %s", (b,))
     assert any({p["a"], p["b"]} == {a, b} for p in tags.audit(scratch))
+
+
+def test_rename_keeps_the_old_name_as_an_alias(scratch):
+    run = runs.start(scratch, "tagging", "test")
+    tag = tags.propose(scratch, "Xylq Quartz Wybn", "person_or_group", None, (), None, (), run, {}).tag["id"]
+    tags.rename(scratch, tag, "Xylq Quärtz Wybn Jr")
+    assert scratch.execute("SELECT canonical_name FROM tags WHERE id = %s", (tag,)).fetchone()["canonical_name"] \
+        == "Xylq Quärtz Wybn Jr"
+    assert tags.find(scratch, "Xylq Quartz Wybn")[0]["id"] == tag
+    labels = scratch.execute("SELECT count(*) FILTER (WHERE is_canonical) AS c FROM tag_labels WHERE tag_id = %s",
+                             (tag,)).fetchone()
+    assert labels["c"] == 1
+
+
+def test_aliases_can_move_between_tags(scratch):
+    run = runs.start(scratch, "tagging", "test")
+    art = tags.propose(scratch, "Xylq Mural Wybn", "movement", None, ("Xylq Spray Wybn",), None, (), run, {}).tag["id"]
+    tags.remove_alias(scratch, art, "Xylq Spray Wybn")
+    graffiti = tags.propose(scratch, "Xylq Spray Wybn", "theme", None, (), None, (art,), run, {})
+    assert graffiti.status == "created"
