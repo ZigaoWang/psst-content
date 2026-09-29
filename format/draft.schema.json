@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://psst.zigao.wang/format/draft.schema.json",
+  "title": "Psst research draft",
+  "description": "What a researcher submits for one research cell with `psst draft submit`. Everything becomes a draft; nothing here reaches the app until it is reviewed and published. Coordinates are never written here: each new place names its Wikidata item and/or OpenStreetMap element, and the tools look up the position.",
+  "type": "object",
+  "required": ["cell", "places"],
+  "additionalProperties": false,
+  "properties": {
+    "cell": {"type": "string", "pattern": "^[0-9a-f]{15}$", "description": "The research cell this draft is for."},
+    "notes": {"type": "string", "description": "Anything the reviewer or the next researcher should know about this cell."},
+    "places": {"type": "array", "items": {"$ref": "#/$defs/place"}},
+    "skipped": {
+      "type": "array",
+      "description": "Candidates looked at and left out, with why. Saves the next researcher the same work.",
+      "items": {
+        "type": "object", "required": ["name", "reason"], "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"}, "reason": {"type": "string"},
+          "wikidata": {"type": "string", "pattern": "^Q[1-9][0-9]*$"},
+          "osm": {"type": "string", "pattern": "^(node|way|relation)/[1-9][0-9]*$"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "place": {
+      "oneOf": [
+        {
+          "description": "New facts for a place already in the database.",
+          "type": "object", "required": ["place", "facts"], "additionalProperties": false,
+          "properties": {
+            "place": {"type": "string", "pattern": "^pl_[0-9a-hjkmnp-tv-z]{10}$"},
+            "facts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/fact"}}
+          }
+        },
+        {
+          "description": "A new place.",
+          "type": "object", "required": ["name", "kind", "facts"], "additionalProperties": false,
+          "anyOf": [{"required": ["wikidata"]}, {"required": ["osm"]}],
+          "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": 80, "description": "The English name people use."},
+            "localName": {
+              "type": "object", "required": ["lang", "name"], "additionalProperties": false,
+              "description": "The name on the signs, when it isn't the English one.",
+              "properties": {"lang": {"type": "string"}, "name": {"type": "string", "minLength": 1}}
+            },
+            "kind": {"enum": ["transit", "crossing", "street", "building", "worship", "memorial", "green", "water", "culture"]},
+            "size": {"enum": ["small", "medium", "large"]},
+            "wikidata": {"type": "string", "pattern": "^Q[1-9][0-9]*$"},
+            "osm": {"type": "string", "pattern": "^(node|way|relation)/[1-9][0-9]*$"},
+            "facts": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/fact"}}
+          }
+        }
+      ]
+    },
+    "fact": {
+      "type": "object",
+      "required": ["category", "veracity", "headline", "short", "long", "sources", "tags"],
+      "additionalProperties": false,
+      "properties": {
+        "category": {"enum": ["name", "hidden", "history", "design", "engineering", "people", "pop", "quirk"]},
+        "veracity": {"enum": ["fact", "legend", "disputed"]},
+        "headline": {"type": "string", "minLength": 1, "maxLength": 60},
+        "short": {"type": "string", "minLength": 1, "maxLength": 220},
+        "long": {"type": "string", "minLength": 300, "maxLength": 1200},
+        "sources": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "required": ["url", "title", "publisher"], "additionalProperties": false,
+            "properties": {
+              "url": {"type": "string", "pattern": "^https://"},
+              "title": {"type": "string", "minLength": 1},
+              "publisher": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "tags": {
+          "type": "array", "uniqueItems": true,
+          "description": "Existing tag ids (tg_...). Find them with `psst tags search`; add new ones with `psst tags propose` first.",
+          "items": {"type": "string", "pattern": "^tg_[0-9a-hjkmnp-tv-z]{8}$"}
+        }
+      }
+    }
+  }
+}

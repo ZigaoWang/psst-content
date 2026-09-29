@@ -249,6 +249,193 @@ def tags_apply(args) -> int:
     return 0
 
 
+# Research ----------------------------------------------------------------------------------------------
+
+WORK = ROOT / "work"
+
+
+@command("research plan", "Create the research cells (H3 resolution 7) covering a city.",
+         arg("city", help="the city's English name, e.g. London"), arg("--country", help="ISO code, if ambiguous"))
+def research_plan(args) -> int:
+    from . import research
+    with db.connect(actor="research") as conn:
+        city = research.find_city(conn, args.city, args.country and args.country.upper())
+        result = research.plan(conn, city)
+    print(f"{city['name']} ({city['country_code']}): {result['cells']} cells planned, "
+          f"{result['already_done']} already researched.")
+    return 0
+
+
+@command("research cells", "List research cells and their state.",
+         arg("--city", help="only this city (English name)"), arg("--state", help="only cells in this state"),
+         arg("--json", action="store_true"))
+def research_cells_command(args) -> int:
+    from . import research
+    with db.connect() as conn:
+        rows = conn.execute(research.CELL_STATS + """
+            WHERE (%s::text IS NULL OR ci.name = %s) AND (%s::text IS NULL OR rc.state = %s)
+            ORDER BY ci.name, rc.state, rc.cell""", (args.city, args.city, args.state, args.state)).fetchall()
+    if args.json:
+        print_json(rows)
+        return 0
+    for r in rows:
+        print(f"{r['cell']}  {r['state']:<8} {r['city'] or '':<16} {r['places']:>3} places  "
+              f"{r['published']:>3} published  {r['pending']:>3} waiting")
+    print(f"{len(rows)} cells.")
+    return 0
+
+
+@command("research claim", "Claim a cell for a research run and write its brief to work/<cell>/.",
+         arg("--cell", help="a specific cell (default: the most wanted open cell)"),
+         arg("--city", help="pick from this city (English name)"), arg("--country"),
+         arg("--no-sweep", action="store_true", help="skip the Wikipedia and OpenStreetMap leads"), RUN_ARG)
+def research_claim(args) -> int:
+    from . import research, runs
+    with db.connect(actor="research", run=args.run) as conn:
+        runs.require(conn, args.run, "research")
+        city_id = research.find_city(conn, args.city, args.country)["id"] if args.city else None
+        cell = research.claim(conn, args.run, args.cell, city_id)
+    print(f"Claimed {cell['cell']} ({cell['city']}) until {cell['claimed_until']:%Y-%m-%d %H:%M %Z}. "
+          f"It has {cell['places']} places and {cell['published']} published facts.")
+    with db.connect() as conn:
+        data = research.brief(conn, cell["cell"], sweep=not args.no_sweep)
+    path = research.write_brief(data, WORK / cell["cell"])
+    print(f"Brief: {path} ({len(data['existingPlaces'])} places nearby, {len(data['candidates'])} leads).")
+    print(f"Write the draft to {WORK / cell['cell'] / 'draft.json'} (format/draft.schema.json).")
+    return 0
+
+
+@command("research brief", "Write the brief for a cell again (for example after a failed sweep).",
+         arg("cell"), arg("--no-sweep", action="store_true"))
+def research_brief(args) -> int:
+    from . import research
+    with db.connect() as conn:
+        data = research.brief(conn, args.cell, sweep=not args.no_sweep)
+    print(research.write_brief(data, WORK / args.cell))
+    return 0
+
+
+@command("research release", "Give up a claim without submitting anything.", arg("cell"), RUN_ARG)
+def research_release(args) -> int:
+    from . import research
+    with db.connect(actor="research", run=args.run) as conn:
+        research.release(conn, args.cell)
+    print(f"Released {args.cell}.")
+    return 0
+
+
+def _print_report(report, label: str) -> None:
+    for error in report.errors:
+        print(f"  error    {error}")
+    for warning in report.warnings:
+        print(f"  warning  {warning}")
+    print(f"{label}: {len(report.errors)} errors, {len(report.warnings)} warnings.")
+
+
+@command("draft check", "Check a research draft: format, writing rules, sources, tags, duplicates, coordinates.",
+         arg("file"), arg("--offline", action="store_true", help="skip the coordinate lookups"))
+def draft_check(args) -> int:
+    from . import research
+    draft = research.load_draft(Path(args.file))
+    with db.connect() as conn:
+        checked = research.check(conn, draft, online=not args.offline)
+    _print_report(checked.report, args.file)
+    return 0 if checked.report.ok else 1
+
+
+@command("draft submit", "Store a checked draft. Everything is saved as a draft for review, never published.",
+         arg("file"), RUN_ARG)
+def draft_submit(args) -> int:
+    from . import research, runs
+    draft = research.load_draft(Path(args.file))
+    with db.connect(actor="research", run=args.run, note="Submitted draft.") as conn:
+        run = runs.require(conn, args.run, "research")
+        checked = research.check(conn, draft)
+        if not checked.report.ok:
+            _print_report(checked.report, args.file)
+            return 1
+        counts = research.submit(conn, draft, run, checked)
+    for warning in checked.report.warnings:
+        print(f"  warning  {warning}")
+    print(f"Stored {counts['places']} new places, {counts['facts']} draft facts, {counts['sources']} new sources "
+          f"for {draft['cell']}.")
+    if counts["new_place_ids"]:
+        try:
+            with db.connect(actor="names") as conn:
+                research.fetch_names(conn, counts["new_place_ids"])
+        except RuntimeError as exc:
+            print(f"Names not fetched ({exc}); run psst names fetch --missing-only later.")
+    return 0
+
+
+# Review ------------------------------------------------------------------------------------------------
+
+@command("review next", "Write the next facts to review (reported facts first, then drafts) to a file.",
+         arg("--out", required=True), arg("--limit", type=int, default=25), arg("--cell"), RUN_ARG)
+def review_next(args) -> int:
+    from . import review, runs
+    with db.connect() as conn:
+        runs.require(conn, args.run, "review")
+        rows = review.queue(conn, args.limit, args.cell, args.run)
+        waiting = conn.execute("SELECT count(*) FILTER (WHERE state = 'draft') AS drafts, "
+                               "count(*) FILTER (WHERE needs_review AND state <> 'retired') AS flagged FROM facts").fetchone()
+    Path(args.out).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"Wrote {len(rows)} facts to {args.out}. Waiting overall: {waiting['drafts']} drafts, "
+          f"{waiting['flagged']} reported or flagged.")
+    return 0
+
+
+@command("review apply", "Apply review decisions from a JSON file (see CONTENT_GUIDE.md, Reviewing).",
+         arg("file"), arg("--dry-run", action="store_true", help="only check the decisions"), RUN_ARG)
+def review_apply(args) -> int:
+    from . import review, runs
+    decisions = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    with db.connect(actor="review", run=args.run, note="Review decision.") as conn:
+        run = runs.require(conn, args.run, "review")
+        report = review.check(conn, decisions, run)
+        if not report.ok or args.dry_run:
+            _print_report(report, args.file)
+            return 0 if report.ok else 1
+        counts = review.apply(conn, decisions, run)
+    print(f"Approved {counts['approve']}, edited {counts['edit']}, rejected {counts['reject']}.")
+    return 0
+
+
+@command("reports list", "Show open problem reports from the app.", arg("--json", action="store_true"))
+def reports_list(args) -> int:
+    with db.connect() as conn:
+        rows = conn.execute("""
+            SELECT r.id, r.fact_id, r.reason, r.message, r.app_version, r.created_at, f.headline, n.name AS place
+            FROM reports r JOIN facts f ON f.id = r.fact_id
+            JOIN place_names n ON n.place_id = f.place_id AND n.role = 'display'
+            WHERE r.state = 'open' ORDER BY r.created_at""").fetchall()
+    if args.json:
+        print_json(rows)
+        return 0
+    for r in rows:
+        print(f"#{r['id']} {r['created_at']:%Y-%m-%d} {r['reason']:<9} {r['fact_id']} {r['place']}: {r['headline']}")
+        if r["message"]:
+            print(f"      {r['message']}")
+    print(f"{len(rows)} open reports. Reported facts come first in psst review next.")
+    return 0
+
+
+@command("coverage", "Build the coverage map and upload it to /coverage/ (use --out to only write it).",
+         arg("--out", help="write the page here instead of uploading"))
+def coverage_command(args) -> int:
+    from . import coverage, publish
+    with db.connect() as conn:
+        html = coverage.build(conn)
+    path = coverage.write(html, Path(args.out) if args.out else ROOT / "export" / "coverage" / "index.html")
+    if args.out:
+        print(f"Wrote {path}.")
+        return 0
+    config = publish.settings()
+    coverage.upload(config["host"], path)
+    print(f"Uploaded to {config['url']}/coverage/.")
+    return 0
+
+
 # Backups ---------------------------------------------------------------------------------------------
 
 @command("backup export", "Write the database as sorted CSV files (the nightly GitHub backup).",
@@ -361,6 +548,10 @@ def publish_command(args) -> int:
         conn.execute("INSERT INTO publications (channel, content_version, manifest, places, facts, run_id) "
                      "VALUES ('production', %s, %s, %s, %s, %s)",
                      (manifest["contentVersion"], json.dumps(manifest), result.places, result.facts, run))
+        # A reviewed cell is done once everything in it is published or rejected.
+        conn.execute("""UPDATE research_cells rc SET state = 'done' WHERE rc.state = 'reviewed' AND NOT EXISTS (
+                            SELECT 1 FROM facts f JOIN places p ON p.id = f.place_id
+                            WHERE p.h3_cell = rc.cell AND f.state IN ('draft', 'reviewed'))""")
         runs.finish(conn, run)
     print(f"Promoted {manifest['contentVersion']} to production.")
     return 0
