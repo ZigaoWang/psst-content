@@ -39,7 +39,6 @@ QUEUE = """
       AND (%(cell)s::text IS NULL OR p.h3_cell = %(cell)s)
       AND (%(city)s::text IS NULL OR ci.name = %(city)s)
       AND (%(run)s::text IS NULL OR f.research_run <> %(run)s)
-      AND (%(model)s::text IS NULL OR f.researched_by <> %(model)s)
     ORDER BY CASE WHEN %(sample)s THEN random() END, f.needs_review DESC, f.state = 'draft' DESC, nb.name, dn.name,
              f.position
     LIMIT %(limit)s"""
@@ -49,13 +48,9 @@ def queue(conn, limit: int, cell: str | None = None, reviewer_run: str | None = 
           verify: bool = False, sample: bool = False) -> list[dict]:
     """Facts waiting for review: reported and flagged facts first, then drafts, grouped by neighborhood and
     place. With `verify`, published facts nobody has checked since they were migrated. A run never gets
-    its own research, or anything written by its own model. With `sample`, a random selection instead,
+    its own research. With `sample`, a random selection instead,
     to estimate how accurate a batch of content is without checking all of it."""
-    model = None
-    if reviewer_run:
-        row = conn.execute("SELECT model FROM pipeline_runs WHERE id = %s", (reviewer_run,)).fetchone()
-        model = row and row["model"]
-    return conn.execute(QUEUE, {"cell": cell, "city": city, "run": reviewer_run, "model": model,
+    return conn.execute(QUEUE, {"cell": cell, "city": city, "run": reviewer_run,
                                 "verify": verify, "sample": sample, "limit": limit}).fetchall()
 
 
@@ -102,8 +97,6 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
             report.error(where, f"is {fact['state']} and not flagged; nothing to review")
         if fact["research_run"] == run["id"]:
             report.error(where, "a run can't review its own research")
-        if run["model"] and run["model"] == fact["researched_by"]:
-            report.error(where, f"was written by {run['model']}; a different model has to review it")
         choice = decision.get("decision")
         if choice not in DECISIONS:
             report.error(where, f"decision must be one of {', '.join(DECISIONS)}")

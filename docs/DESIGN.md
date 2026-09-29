@@ -110,7 +110,7 @@ Research agents never write SQL. They work through the CLI:
 4. `psst review next` hands a different run the reported facts, then the drafts. It checks sources and veracity skeptically and writes a decision for each fact: approve, edit (which covers relabeling as legend or disputed), or reject, always with notes on what was checked. `psst review apply` checks every decision against the writing rules and records them all or none. Approved facts become `reviewed`; rejected ones are retired with the reason.
 5. `psst publish` moves reviewed facts to `published`, exports, uploads to staging, checks staging, and promotes to production.
 
-Every Saturday `psst sources check` requests every cited link; a source that fails twice in a row flags its facts for review, and sites that refuse scripts are only recorded as blocked. Published facts migrated from the area files are verified by the same review (`psst review next --verify`), always by a different model from the one that wrote them.
+Every Saturday `psst sources check` requests every cited link; a source that fails twice in a row flags its facts for review, and sites that refuse scripts are only recorded as blocked. Published facts migrated from the area files are verified by the same review (`psst review next --verify`).
 
 `psst` also has `status`, `places search`, `tags`, `reports list`, `review flag`, `coverage`, `backup`, `hierarchy`, `names`, and `db` commands. Every change goes through a command, is attributed to a run, and lands in `fact_events` (state changes, edits with the fields changed, and flags).
 

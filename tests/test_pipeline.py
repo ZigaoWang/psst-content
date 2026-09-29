@@ -190,22 +190,19 @@ def test_claim_goes_where_people_looked(scratch):
     assert top["cell"] == area and top["views"] == 1000 and top["plannedCells"] > 0
 
 
-def test_migrated_facts_are_verified_by_a_different_model(scratch):
-    fact = scratch.execute("""SELECT f.id, f.researched_by, ci.name AS city FROM facts f JOIN places p ON p.id = f.place_id
+def test_migrated_facts_can_be_verified(scratch):
+    fact = scratch.execute("""SELECT f.id, ci.name AS city FROM facts f JOIN places p ON p.id = f.place_id
                               JOIN admin_areas ci ON ci.id = p.city_id
                               WHERE f.state = 'published' AND f.last_verified_at IS NULL LIMIT 1""").fetchone()
-    same = start(scratch, "review", fact["researched_by"])
-    other = start(scratch, "review", "some-other-model")
-    assert fact["id"] not in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=same["id"], verify=True)]
-    assert fact["id"] in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=other["id"], city=fact["city"],
+    reviewer = start(scratch, "review", "any-model")
+    assert fact["id"] in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=reviewer["id"], city=fact["city"],
                                                          verify=True)]
     decision = {"fact": fact["id"], "decision": "approve", "notes": "Opened both sources; every detail matches."}
-    assert any("different model" in e for e in review.check(scratch, [decision], same).errors)
-    assert review.check(scratch, [decision], other).ok
-    review.apply(scratch, [decision], other)
+    assert review.check(scratch, [decision], reviewer).ok
+    review.apply(scratch, [decision], reviewer)
     row = scratch.execute("SELECT state, last_verified_at, reviewed_by FROM facts WHERE id = %s", (fact["id"],)).fetchone()
-    assert row["state"] == "published" and row["last_verified_at"] and row["reviewed_by"] == "some-other-model"
-    assert fact["id"] not in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=other["id"], verify=True)]
+    assert row["state"] == "published" and row["last_verified_at"] and row["reviewed_by"] == "any-model"
+    assert fact["id"] not in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=reviewer["id"], verify=True)]
 
 
 def test_local_names_must_be_in_the_countrys_language(scratch):

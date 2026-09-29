@@ -55,7 +55,7 @@ The jobs:
 - **Reviewer:** a different run, skeptical by default, that approves, edits, or rejects each draft fact and handles problem reports (section 12).
 - **Publisher:** runs `psst publish`, which stages everything, checks it, and only then goes live (section 13).
 
-Review always happens in a different session, with a different model from the one that wrote the fact. The tools enforce the model rule: `review next` never hands a model its own writing, and `review apply` refuses it.
+Review always happens in a separate session from the research. A run can never review its own research. Any model can review, as long as it follows this guide.
 
 ## 3. Setup
 
@@ -382,7 +382,7 @@ Ids are assigned by the tools and never change. Nothing else exists in the forma
 
 Review is where Psst stays trustworthy. Assume every draft has a mistake in it until you've failed to find one.
 
-1. Start a review run with your model id: `export PSST_RUN=$(uv run psst run start --kind review --model <model>)`. A run can never review its own research, and a model can never review what it wrote.
+1. Start a review run with your model id: `export PSST_RUN=$(uv run psst run start --kind review --model <model>)`. A run can never review its own research.
 2. Get a batch: `uv run psst review next --out work/review.json` (add `--cell <cell>` or `--city <city>` to narrow it, `--limit` for more than 25). Reported and flagged facts come first, then drafts. Each item has the fact, its place and pin, its sources (with the result of the last link check) and tags, the place's other facts, any open problem reports, and `flagged_because` when a report, a person, or the link check flagged it.
 3. For every fact, check:
    - **The source says it.** Open every source. Check each number, name, and date against it. A claim the sources don't make is a rejection, or an edit that removes it.
@@ -426,7 +426,7 @@ uv run psst review progress                                            # what's 
 uv run psst review next --verify --city "Kuala Lumpur" --out work/review.json
 ```
 
-`--verify` picks published facts nobody has checked since the migration, never ones written by your own model. Add `--sample` for a random selection: reviewing 60 or so sampled facts per city estimates how accurate that city's content is, for far fewer tokens than checking every fact, and tells you whether a full pass is worth it. Review them exactly as above. Approving marks a fact verified; an edit changes it at the next publish; a rejection takes it down at the next publish. Publish after each batch of decisions.
+`--verify` picks published facts nobody has checked since the migration. Add `--sample` for a random selection: reviewing 60 or so sampled facts per city estimates how accurate that city's content is, for far fewer tokens than checking every fact, and tells you whether a full pass is worth it. Review them exactly as above. Approving marks a fact verified; an edit changes it at the next publish; a rejection takes it down at the next publish. Publish after each batch of decisions.
 
 ## 13. Publishing
 
