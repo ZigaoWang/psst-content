@@ -206,3 +206,11 @@ def test_migrated_facts_are_verified_by_a_different_model(scratch):
     row = scratch.execute("SELECT state, last_verified_at, reviewed_by FROM facts WHERE id = %s", (fact["id"],)).fetchone()
     assert row["state"] == "published" and row["last_verified_at"] and row["reviewed_by"] == "some-other-model"
     assert fact["id"] not in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=other["id"], verify=True)]
+
+
+def test_local_names_must_be_in_the_countrys_language(scratch):
+    petronas = coords.Position(3.1579, 101.7116, "wikidata", "Q83063")
+    assert research.local_name_problem(scratch, {"lang": "zh-Hans", "name": "双峰塔"}, petronas)
+    assert research.local_name_problem(scratch, {"lang": "ms", "name": "Menara Berkembar Petronas"}, petronas) is None
+    peace_hotel = coords.Position(31.2405, 121.4903, "wikidata", "Q377875")
+    assert research.local_name_problem(scratch, {"lang": "zh-Hans", "name": "和平饭店"}, peace_hotel) is None

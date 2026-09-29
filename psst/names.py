@@ -75,22 +75,51 @@ def collect(places: list[dict]) -> tuple[list[tuple], list[tuple], list[str]]:
             if m and m.group(1) in WIKIDATA_LANGUAGES and m.group(1) not in names:
                 names[m.group(1)] = (value, "osm")
 
-        # The name on the signs.
+        # The name on the signs, which is always in the country's language: Wikidata's label in that
+        # language, else OSM's. OSM's plain name is used only when its script proves its language (Chinese
+        # characters in China); a Latin-script plain name could be English as easily as Malay.
         country = p["country"] or ""
-        if not p["local"]:
-            local_lang = COUNTRY_LANGUAGE.get(country)
-            candidate = tags.get("name")
-            source = "osm"
-            if not candidate and local_lang and local_lang in names:
-                candidate, source = names[local_lang]
-            if candidate and not _same(candidate, p["display"]) and local_lang != "en":
-                rows.append((p["id"], "local", language_of_local(candidate, country), candidate, source))
+        local_lang = COUNTRY_LANGUAGE.get(country)
+        if not p["local"] and local_lang and local_lang != "en":
+            candidate = names.get(local_lang)
+            if not candidate and tags.get("name") and HAN.search(tags["name"]) \
+                    and language_of_local(tags["name"], country) == local_lang:
+                candidate = (tags["name"], "osm")
+            if candidate and not _same(candidate[0], p["display"]):
+                rows.append((p["id"], "local", local_lang, candidate[0], candidate[1]))
 
         for lang, (name, source) in names.items():
             if lang == "en" and _same(name, p["display"]):
                 continue
             rows.append((p["id"], "alt", lang, name, source))
     return rows, new_qids, notes
+
+
+def misplaced_local_names(conn) -> list[dict]:
+    """Local names that aren't in their country's language (the name on the signs must be)."""
+    return [r for r in conn.execute("""
+        SELECT n.place_id, n.lang, n.name, p.country_code AS country FROM place_names n
+        JOIN places p ON p.id = n.place_id WHERE n.role = 'local'""").fetchall()
+            if COUNTRY_LANGUAGE.get(r["country"]) not in (None, "en", r["lang"])]
+
+
+def fix_local_names(conn, rows: list[dict], keep_as_alt: bool = True) -> int:
+    """Replace misplaced local names: drop them, look up the real local name and every other name, and keep
+    a misplaced name as an alternative only where Wikidata and OSM have none in its language. Returns how
+    many places now have a local name."""
+    ids = [r["place_id"] for r in rows]
+    conn.execute("DELETE FROM place_names WHERE place_id = ANY(%s) AND role = 'local'", (ids,))
+    places = conn.execute("""
+        SELECT p.id, p.country_code AS country, p.wikidata_id, p.osm_ref,
+               (SELECT name FROM place_names WHERE place_id = p.id AND role = 'display') AS display, NULL AS local
+        FROM places p WHERE p.id = ANY(%s)""", (ids,)).fetchall()
+    if places:
+        apply(conn, places)
+    for r in rows if keep_as_alt else []:
+        conn.execute("""INSERT INTO place_names (place_id, role, lang, name, source) VALUES (%s, 'alt', %s, %s, 'research')
+                        ON CONFLICT (place_id, role, lang) DO NOTHING""", (r["place_id"], r["lang"], r["name"]))
+    return conn.execute("SELECT count(*) AS n FROM place_names WHERE role = 'local' AND place_id = ANY(%s)",
+                        (ids,)).fetchone()["n"]
 
 
 def apply(conn, places: list[dict]) -> dict[str, int]:

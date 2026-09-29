@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from psst import ids, legacy, rules
+from psst import ids, legacy, names, rules
 
 
 @pytest.fixture(scope="module")
@@ -41,13 +41,22 @@ def test_every_legacy_place_is_stored(spots, stored):
     assert all(places[s.legacy_id]["state"] == "active" for s in spots)
 
 
-def test_places_keep_name_kind_and_exact_coordinates(spots, stored):
+def test_places_keep_name_kind_and_exact_coordinates(spots, stored, database):
     places, _ = stored
+    place_country = {s.legacy_id: s.area["countryCode"] for s in spots}
+    alt_languages: dict[str, set] = {}
+    with database.transaction(force_rollback=True):
+        for r in database.execute("SELECT place_id, lang FROM psst.place_names WHERE role = 'alt'"):
+            alt_languages.setdefault(r["place_id"], set()).add(r["lang"])
     for spot in spots:
         row, data = places[spot.legacy_id], spot.spot
         assert row["name"] == data["name"], spot.legacy_id
-        if data.get("localName"):
-            assert row["local_name"] == data["localName"], spot.legacy_id
+        if data.get("localName") and row["local_name"] != data["localName"]:
+            # The one deliberate change: a local name not in the country's language (Chinese names in
+            # Kuala Lumpur) was replaced by the real one, and the place keeps a name in that language.
+            lang = names.language_of_local(data["localName"], place_country[spot.legacy_id])
+            assert lang != names.COUNTRY_LANGUAGE.get(place_country[spot.legacy_id]), spot.legacy_id
+            assert lang in alt_languages.get(places[spot.legacy_id]["id"], set()), spot.legacy_id
         assert row["kind"] == data["kind"], spot.legacy_id
         assert (row["coord_source"], row["coord_source_ref"]) == (data["coordinateSource"]["type"],
                                                                   data["coordinateSource"]["id"]), spot.legacy_id

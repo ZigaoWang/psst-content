@@ -66,6 +66,20 @@ def hierarchy_assign(args) -> int:
     return 0
 
 
+@command("names fix-local", "Move local names that aren't in their country's language to alternative names, "
+         "then look up the real local name.")
+def names_fix_local(args) -> int:
+    from . import names
+    with db.connect(actor="names") as conn:
+        wrong = names.misplaced_local_names(conn)
+        for r in wrong:
+            print(f"  {r['place_id']}  {r['name']} ({r['lang']}, in {r['country']})")
+        fixed = names.fix_local_names(conn, wrong)
+    print(f"Replaced {len(wrong)} local names in the wrong language (kept as alternative names); "
+          f"found the real local name for {fixed}.")
+    return 0
+
+
 @command("names fetch", "Fetch multilingual names from Wikidata and OpenStreetMap for every place.",
          arg("--missing-only", action="store_true", help="only places with no alt names yet"))
 def names_fetch(args) -> int:

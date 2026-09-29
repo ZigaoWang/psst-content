@@ -361,6 +361,9 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
                 report.error(where, f"{pos.ref} is at {pos.lat:.6f}, {pos.lon:.6f}, outside this cell and its neighbors")
             elif placed != cell:
                 report.warn(where, f"{pos.ref} falls in the neighboring cell {placed}")
+            problem = local_name_problem(conn, place.get("localName"), pos)
+            if problem:
+                report.error(where, problem)
             near = conn.execute("""
                 SELECT p.id, n.name, round(ST_Distance(p.geom::geography, ST_MakePoint(%(lon)s, %(lat)s)::geography)) AS m
                 FROM places p JOIN place_names n ON n.place_id = p.id
@@ -373,6 +376,21 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
     elif not online and new_places:
         report.warn("draft", "coordinates not checked (offline); submit always checks them")
     return Checked(report, positions)
+
+
+def local_name_problem(conn, local: dict | None, pos: coords.Position) -> str | None:
+    """The local name is the name on the signs, so it must be in the language of the country it's in."""
+    if not local:
+        return None
+    country = conn.execute("""
+        SELECT a.country_code FROM admin_area_parts ap JOIN admin_areas a ON a.id = ap.area_id
+        WHERE a.level = 'country' AND ST_Intersects(ap.geom, ST_SetSRID(ST_MakePoint(%s, %s), 4326))
+        LIMIT 1""", (pos.lon, pos.lat)).fetchone()
+    language = names.COUNTRY_LANGUAGE.get(country["country_code"]) if country else None
+    if language and local["lang"] != language:
+        return (f"localName is the name on the signs, which in {country['country_code']} is in '{language}', not "
+                f"'{local['lang']}'. Names in other languages are added automatically.")
+    return None
 
 
 def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
