@@ -20,22 +20,22 @@ First, always run `uv run psst status`. If it fails, the machine isn't set up (g
 Default: 3 cells, one after another, in the city named.
 
 1. `uv run psst city list`. If the city isn't there, set it up: `uv run psst city add "<City>" --country <ISO code>`. If it says the name wasn't found, pick the right one from the close matches it lists (the official name, like "Kuala Lumpur" or "Hong Kong").
-2. Start one research run for the session: `export PSST_RUN=$(uv run psst run start --kind research --model <your model id> --notes "<what you were asked>")`.
+2. Start one research run for the session: `uv run psst run start --kind research --model <your model id> --notes "<what you were asked>"`. It prints the run id. Pass it as `--run <id>` to every command that takes one; environment variables may not last from one command to the next.
 3. For each cell:
-   - Claim one: `uv run psst research claim --city "<City>"`. In a dense cell this takes a few minutes (it sweeps Wikipedia and OpenStreetMap), so give the command up to 10 minutes. If they named an area ("around the Bund"), find its coordinates (Wikidata, or a place already in Psst via `uv run psst places search`) and add `--near <lat>,<lon>`.
+   - Claim one: `uv run psst research claim --city "<City>"`. Claiming prefers cells with the fewest research passes, so after a partial pass you get a different cell. In a dense cell this takes a few minutes (it sweeps Wikipedia and OpenStreetMap), so give the command up to 10 minutes. If they named an area ("around the Bund"), find its coordinates (Wikidata, or a place already in Psst via `uv run psst places search`) and add `--near <lat>,<lon>`.
    - Research it exactly as the guide says (section 5): account for every lead in the brief, add what the sweep can't see, write, tag, check, fix, submit. Read every source with `uv run psst fetch <url>` (guide, section 8): it gets past sites that refuse scripts by reading their Internet Archive copy.
    - If the cell is too big to do well in what's left of your session, submit what's finished and leave the remaining leads with `"later": true`. Never rush facts to finish a cell.
-4. `uv run psst run finish $PSST_RUN`.
+4. `uv run psst run finish <run id>`.
 5. Report per cell: the neighborhoods, places added, facts written, leads skipped, and leads left for later. Don't review or publish your own drafts.
 
 ## Review and publish
 
 Default: everything waiting.
 
-1. Start a review run: `export PSST_RUN=$(uv run psst run start --kind review --model <your model id> --notes "Review")`.
+1. Start a review run: `uv run psst run start --kind review --model <your model id> --notes "Review"`, and pass the id it prints as `--run <id>` to every command that takes one.
 2. Repeat until it returns no facts: `uv run psst review next --out work/review.json`, then review each fact as the guide says (section 12): open the sources, check every claim, and approve, edit, or reject with notes. Write `work/decisions.json`, run `uv run psst review apply work/decisions.json --dry-run`, fix anything it reports, then apply.
 3. `uv run psst publish`. If the staging check fails, report what it said; don't work around it.
-4. `uv run psst run finish $PSST_RUN`, and report how many facts were approved, edited, and rejected, and what kinds of problems you found.
+4. `uv run psst run finish <run id>`, and report how many facts were approved, edited, and rejected, and what kinds of problems you found.
 
 ## Check the old content
 

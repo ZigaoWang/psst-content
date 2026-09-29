@@ -5,6 +5,7 @@ and the output says so. Cite the original URL either way (guide, section 8)."""
 from __future__ import annotations
 
 import html
+import http.client
 import re
 import urllib.error
 import urllib.parse
@@ -68,12 +69,15 @@ class _Text(HTMLParser):
 
 
 def _get(url: str) -> tuple[int, str, bytes]:
+    """(status, content type, body). Any failure to connect is status 0, never an exception."""
     request = urllib.request.Request(url, headers={"User-Agent": net.USER_AGENT, "Accept": "text/html,*/*"})
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return response.status, response.headers.get("Content-Type", ""), response.read(5_000_000)
     except urllib.error.HTTPError as exc:
         return exc.code, "", b""
+    except (OSError, ValueError, http.client.HTTPException):
+        return 0, "", b""
 
 
 def _archive_copy(url: str) -> tuple[str, str] | None:
@@ -106,10 +110,7 @@ def _page(url: str, status: int, content_type: str, body: bytes, **extra) -> Pag
 def read(url: str, archive: bool = False) -> Page:
     """Read a page. With `archive`, go straight to the Internet Archive."""
     if not archive:
-        try:
-            status, content_type, body = _get(url)
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
-            status, content_type, body = 0, "", str(exc).encode()
+        status, content_type, body = _get(url)
         if 200 <= status < 400 and body:
             return _page(url, status, content_type, body)
         # Refused, gone, or down: an archived copy of the same page is the next best thing.

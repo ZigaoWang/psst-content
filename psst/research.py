@@ -139,12 +139,15 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
         done = {r["cell"] for r in conn.execute("SELECT cell FROM research_cells WHERE state = 'done'")}
         existing = {r["h3_cell"]: r["n"] for r in conn.execute(
             "SELECT h3_cell, count(*) AS n FROM places WHERE state = 'active' GROUP BY h3_cell")}
+        passes = {r["cell"]: r["passes"] for r in conn.execute("SELECT cell, passes FROM research_cells")}
 
-        # Where people looked first; then cells that already show rich content (they're dense areas that
-        # were only partly covered); then next to finished cells, so coverage grows outward evenly.
+        # Where people looked first; then cells with the fewest passes, so every cell gets one before any
+        # gets a second; then cells that already show rich content (dense areas only partly covered); then
+        # next to finished cells, so coverage grows outward evenly.
         def priority(c: str) -> tuple:
             parent = h3.cell_to_parent(c, cells.DEMAND_RESOLUTION)
-            return (-demand.get(parent, 0), -existing.get(c, 0), -sum(n in done for n in cells.neighbors(c)), c)
+            return (-demand.get(parent, 0), passes.get(c, 0), -existing.get(c, 0),
+                    -sum(n in done for n in cells.neighbors(c)), c)
 
         if near:
             # The open cell closest to a spot the person asked for ("focus on the Bund").
