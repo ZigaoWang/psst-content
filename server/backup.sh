@@ -1,13 +1,15 @@
 #!/bin/sh
 # Nightly Psst backup, run by cron as root (see psst-backup.cron):
-#  1. a pg_dump of the whole database, kept 14 days on this server;
+#  1. a pg_dump of the whole database (less one rebuildable index), kept 14 days on this server;
 #  2. a sorted plain-text export committed and pushed to the private GitHub repo psst-db-backup.
 set -eu
+export LC_ALL=C.UTF-8
 base=/www/wwwroot/psst/backup
 stamp=$(date -u +%Y-%m-%dT%H%MZ)
 mkdir -p "$base/dumps"
 cd /tmp
-sudo -u postgres pg_dump -Fc psst > "$base/dumps/psst-$stamp.dump.tmp"
+# admin_area_parts is only a lookup index, rebuilt by `psst hierarchy index`; its data is left out.
+sudo -u postgres pg_dump -Fc --exclude-table-data=psst.admin_area_parts psst > "$base/dumps/psst-$stamp.dump.tmp"
 mv "$base/dumps/psst-$stamp.dump.tmp" "$base/dumps/psst-$stamp.dump"
 find "$base/dumps" -name 'psst-*.dump' -mtime +14 -delete
 
