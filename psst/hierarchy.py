@@ -229,6 +229,7 @@ nearest AS (
         SELECT a.id, ST_Distance(a.geom::geography, t.geom::geography) AS distance
         FROM admin_areas a
         WHERE a.level = 'neighborhood' AND a.is_point AND c.city_id IS NOT NULL AND a.parent_id = c.city_id
+          AND a.geom && ST_Expand(t.geom, 0.03)
           AND ST_DWithin(a.geom::geography, t.geom::geography, %(nearest)s)
         ORDER BY a.geom <-> t.geom LIMIT 1
     ) n

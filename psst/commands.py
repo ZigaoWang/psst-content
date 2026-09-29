@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 from . import db
-from .cli import arg, command, print_json
+from .cli import ROOT, arg, command, print_json
 
 
 @command("hierarchy load-wof", "Load a Who's On First admin bundle for one country (run on the VPS).",
@@ -310,3 +311,75 @@ def _create_database(name: str) -> None:
     backup.sudo_postgres("CREATE EXTENSION postgis; CREATE EXTENSION pg_trgm; CREATE EXTENSION unaccent;", name)
     backup.sudo_postgres(f"REVOKE ALL ON DATABASE {name} FROM PUBLIC; GRANT CONNECT ON DATABASE {name} TO psst, psst_api;")
     db.migrate(_database_url(name))
+
+
+# Publishing ------------------------------------------------------------------------------------------
+
+@command("publish", "Publish reviewed facts: export, stage, check staging, promote to production.",
+         arg("--allow-shrink", metavar="REASON", help="allow places or facts to drop by more than 2 percent"),
+         arg("--only-staging", action="store_true", help="stop after checking staging"),
+         arg("--no-new-facts", action="store_true", help="re-export what's published without publishing reviewed facts"))
+def publish_command(args) -> int:
+    from . import export, publish, runs
+    config = publish.settings()
+    with db.connect(actor="publish") as conn:
+        run = runs.start(conn, "publish", None, notes=args.allow_shrink and f"Allowed to shrink: {args.allow_shrink}")
+    with db.connect(actor="publish", run=run) as conn:
+        reviewed = [] if args.no_new_facts else [r["id"] for r in conn.execute(
+            "SELECT id FROM facts WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
+        result = export.build(conn, ROOT / "export", include=reviewed)
+    print(f"Exported {result.places} places and {result.facts} facts ({len(reviewed)} newly published) "
+          f"as {result.manifest['contentVersion']}.")
+    publish.upload_staging(config["host"], result.directory)
+    print(f"Uploaded to staging. Checking {config['url']}/content/staging/ ...")
+    problems = publish.check_staging(config["url"], args.allow_shrink)
+    with db.connect(actor="publish", run=run) as conn:
+        conn.execute("INSERT INTO publications (channel, content_version, manifest, places, facts, run_id, notes) "
+                     "VALUES ('staging', %s, %s, %s, %s, %s, %s)",
+                     (result.manifest["contentVersion"], json.dumps(result.manifest), result.places, result.facts,
+                      run, "; ".join(problems) or "Checks passed."))
+    if problems:
+        print("Staging check FAILED. Production is unchanged.")
+        for problem in problems[:40]:
+            print(f"  {problem}")
+        return 1
+    print("Staging check passed.")
+    if args.only_staging:
+        return 0
+    manifest = publish.promote(config["host"])
+    with db.connect(actor="publish", run=run, note="Published through staging.") as conn:
+        conn.execute("UPDATE facts SET state = 'published', published_at = now() "
+                     "WHERE id = ANY(%s) AND state = 'reviewed'", (reviewed,))
+        conn.execute("INSERT INTO publications (channel, content_version, manifest, places, facts, run_id) "
+                     "VALUES ('production', %s, %s, %s, %s, %s)",
+                     (manifest["contentVersion"], json.dumps(manifest), result.places, result.facts, run))
+        runs.finish(conn, run)
+    print(f"Promoted {manifest['contentVersion']} to production.")
+    return 0
+
+
+@command("rollback", "Point production back at an earlier version.",
+         arg("--to", dest="version", help="a content version (default: the one before the current)"))
+def rollback_command(args) -> int:
+    from . import publish
+    version = publish.rollback(publish.settings()["host"], args.version)
+    print(f"Production now serves {version}.")
+    return 0
+
+
+@command("prune", "Delete pack files no manifest still needs (keeps the last 10 versions).")
+def publish_prune(args) -> int:
+    from . import publish
+    print(f"Removed {publish.prune(publish.settings()['host'])} old pack files.")
+    return 0
+
+
+@command("bundle", "Copy production's content into the app as the snapshot it ships with.",
+         arg("--app", default=os.environ.get("PSST_APP_DIR", str(ROOT.parent / "psst-map")),
+             help="the psst-map repository (default: ../psst-map)"))
+def bundle_command(args) -> int:
+    from . import publish
+    manifest = publish.bundle(publish.settings()["url"], Path(args.app))
+    print(f"Bundled {manifest['contentVersion']} ({manifest['counts']['places']} places, "
+          f"{manifest['counts']['facts']} facts) into {args.app}/Content/v2. Rebuild the app.")
+    return 0
