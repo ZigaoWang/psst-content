@@ -33,8 +33,8 @@ Default: 3 cells, one after another, in the city named.
 Default: everything waiting.
 
 1. Start a review run: `uv run psst run start --kind review --model <your model id> --notes "Review"`, and pass the id it prints as `--run <id>` to every command that takes one.
-2. Repeat until it returns no facts: `uv run psst review next --out work/review.json`, then review each fact as the guide says (section 12): open the sources, check every claim, and approve, edit, or reject with notes. Write `work/decisions.json`, run `uv run psst review apply work/decisions.json --dry-run`, fix anything it reports, then apply.
-3. `uv run psst publish`. If the staging check fails, report what it said; don't work around it.
+2. Repeat until it returns no facts: `uv run psst review next --out work/review.json`, then review each fact as the guide says (section 12): open every source with `uv run psst fetch <url> --run <run id>` (approving is refused otherwise), check every claim against what the source says, and approve, edit, or reject with notes naming each source you checked. Write `work/decisions.json`, run `uv run psst review apply work/decisions.json --dry-run`, fix anything it reports, then apply.
+3. Publish only once every fact in the batch has been checked this way: `uv run psst publish`. Publishing first and fixing later puts mistakes in front of readers. If the staging check fails, report what it said; don't work around it.
 4. `uv run psst run finish <run id>`, and report how many facts were approved, edited, and rejected, and what kinds of problems you found.
 
 ## Check the old content

@@ -272,7 +272,7 @@ Rules:
 - Avoid content farms, AI-written listicles, and travel sites that don't cite anything.
 - For legends, cite a source that tells the story and, ideally, one that examines it.
 - Open every source and confirm it actually says what the fact claims.
-- **Read sources with `uv run psst fetch <url>`.** It prints the page as plain text. When a site refuses scripts (Historic England, Londonist, and many newspapers do) or the page is gone, it reads the newest Internet Archive copy instead and says so. Cite the original URL either way. `--archive` goes straight to the archived copy; `--max` shows more of a long page. Use it instead of any built-in web page tool, which many of these sites block. To find the exact pages a Wikipedia article cites, read its raw text (`uv run psst fetch "https://en.wikipedia.org/w/index.php?title=<Article>&action=raw"`) and look for `url=`. To find a source whose address you don't know, search with `uv run psst fetch "https://lite.duckduckgo.com/lite/?q=<words>"` and read the results it lists; never guess URLs.
+- **Read sources with `uv run psst fetch <url>`.** It prints the page as plain text. When a site refuses scripts (Historic England, Londonist, and many newspapers do) or the page is gone, it reads the newest Internet Archive copy instead and says so. Cite the original URL either way. `--archive` goes straight to the archived copy; `--max` shows more of a long page. Use it instead of any built-in web page tool, which many of these sites block. To find the exact pages a Wikipedia article cites, read its raw text (`uv run psst fetch "https://en.wikipedia.org/w/index.php?title=<Article>&action=raw"`) and look for `url=`. To find a source whose address you don't know, search with `uv run psst fetch "https://lite.duckduckgo.com/lite/?q=<words>"` and read the results it lists; never guess URLs. For a listed building in England, its Wikidata item gives the Historic England list entry number (property P1216), which leads to the listing and its British Listed Buildings copy.
 
 Sources are stored once and shared: cite the same page from two facts and it's one source linked twice. Give it the same title and publisher each time.
 
@@ -399,7 +399,7 @@ Review is where Psst stays trustworthy. Assume every draft has a mistake in it u
 
 1. Start a review run with your model id: `export PSST_RUN=$(uv run psst run start --kind review --model <model>)`. A run can never review its own research.
 2. Get a batch: `uv run psst review next --out work/review.json` (add `--cell <cell>` or `--city <city>` to narrow it, `--limit` for more than 25). Reported and flagged facts come first, then drafts. Each item has the fact, its place and pin, its sources (with the result of the last link check) and tags, the place's other facts, any open problem reports, and `flagged_because` when a report, a person, or the link check flagged it.
-3. For every fact, check:
+3. For every fact, open every source it cites with `uv run psst fetch <url> --run <run id>`. That records the read, and `review apply` refuses to approve or edit a fact whose sources this run hasn't opened. Then check:
    - **The source says it.** Open every source. Check each number, name, and date against it. A claim the sources don't make is a rejection, or an edit that removes it.
    - **The veracity is honest.** One source, or sources repeating each other, means `legend` at most. Would a skeptical historian sign off on `fact`?
    - **It's surprising.** Would a friend say "wait, really?" If not, reject it.
