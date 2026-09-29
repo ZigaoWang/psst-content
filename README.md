@@ -4,6 +4,8 @@ The pipeline behind [Psst](../psst-map), a map of the surprising things about sp
 
 The content itself lives in a PostgreSQL database on the Psst server. The app downloads static files generated from it.
 
+This repository is public so the code can be read. The content (the places and stories) and its backups are private, and neither the code nor the content is licensed for reuse; see [LICENSE](LICENSE).
+
 ## Getting started
 
 ```
