@@ -453,6 +453,18 @@ def review_apply(args) -> int:
     return 0
 
 
+@command("review flag", "Send a published fact back for review, for example after finding a problem yourself.",
+         arg("fact"), arg("--reason", required=True, help="what looks wrong (kept in the fact's history)"))
+def review_flag(args) -> int:
+    with db.connect(actor="review", note=f"Flagged: {args.reason}") as conn:
+        row = conn.execute("UPDATE facts SET needs_review = true WHERE id = %s AND state <> 'retired' RETURNING id",
+                           (args.fact,)).fetchone()
+    if not row:
+        raise RuntimeError(f"No live fact {args.fact}")
+    print(f"Flagged {args.fact}. It stays published until a review decides; psst review next lists it first.")
+    return 0
+
+
 @command("reports list", "Show open problem reports from the app.", arg("--json", action="store_true"))
 def reports_list(args) -> int:
     with db.connect() as conn:
