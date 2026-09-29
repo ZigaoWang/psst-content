@@ -1,45 +1,50 @@
 # Psst content
 
-The places and stories behind [Psst](../psst-map), a map of the surprising things about specific places. Each area is one JSON file in `areas/`. The app bundles them; there is no server.
+The pipeline behind [Psst](../psst-map), a map of the surprising things about specific places: the database schema, the `psst` command for research, review, and publishing, the app's content format, and the server that hosts it.
 
-This repository is separate from the app because the content is its own work, with its own scope and license (see `LICENSE`).
+The content itself lives in a PostgreSQL database on the Psst server. The app downloads static files generated from it.
 
 ## Getting started
 
 ```
-sh scripts/install-hooks.sh     # once: blocks commits with invalid area files
-python3 scripts/validate.py     # check everything
-python3 scripts/stats.py        # what's here
+uv sync
+uv run psst status          # checks the connection and shows what's in the database
+uv run psst --help
 ```
 
-Everything needs only Python 3.10 or later, with no packages to install.
+Setup (the database password and SSH access) is in [CONTENT_GUIDE.md](CONTENT_GUIDE.md), section 3.
 
-## Adding content
+## Doing the work
 
-Read [CONTENT_GUIDE.md](CONTENT_GUIDE.md) first. It covers what makes a good spot and a good fact, how to find them, the file format, and how to check the work. The short version:
+[CONTENT_GUIDE.md](CONTENT_GUIDE.md) is the handbook for researching a cell, reviewing drafts and problem reports, tagging, and publishing. In short:
 
 ```
-python3 scripts/sweep.py --bounds S,W,N,E --name london-soho   # collect candidates
-python3 scripts/coords.py Q123 way/456                          # exact coordinates
-python3 scripts/format.py                                       # canonical formatting
-python3 scripts/validate.py --online                            # check, including coordinates
-git commit -m "feat: add Soho"                                  # one area per commit
-python3 scripts/publish.py                                      # copy into the app
+export PSST_RUN=$(uv run psst run start --kind research --model <model>)
+uv run psst research claim --city London           # claim a cell, get a brief in work/<cell>/
+uv run psst draft check work/<cell>/draft.json      # every rule a script can check
+uv run psst draft submit work/<cell>/draft.json     # stored as drafts, never published directly
+# a separate review run:
+uv run psst review next --out work/review.json
+uv run psst review apply work/decisions.json
+# then:
+uv run psst publish                                 # export, stage, check, promote
+uv run psst bundle                                  # snapshot production into the app before a release
 ```
-
 
 ## Layout
 
 | path | what |
 | --- | --- |
-| `areas/` | one file per area, named after its id |
-| `scripts/` | the validator and the tools listed in the guide |
-| `candidates/`, `plans/`, `tmp/` | working files for a seeding run, not committed |
+| `psst/` | the `psst` command and everything it does |
+| `db/migrations/` | the database schema, applied in order by `psst db migrate` |
+| `format/` | JSON schemas: the research draft format and app content format 2 |
+| `server/` | server setup, the report API, nginx, backups, and the privacy policy |
+| `tests/` | `uv run pytest`: rules, the research pipeline, and proof the migration kept everything |
+| `docs/` | [the design](docs/DESIGN.md), [backups and restoring](docs/RESTORE.md), [privacy declarations](docs/PRIVACY.md) |
+| `work/`, `export/` | scratch space for briefs, drafts, and exports; not committed |
 
-## Publishing to the app
+## Serving the app
 
-`python3 scripts/publish.py` validates every area and syncs `areas/` into the app's `Content/areas` folder (default `../psst-map`, or set `PSST_APP_DIR`). If anything fails validation, nothing is copied. Then build the app.
+`psst publish` writes content format 2 (`format/v2/`) to staging on the server, downloads it back and checks it, and only then promotes it to production at `https://psst.zigao.wang/content/production/v2/`. Pack files are named by their hash and never change; promotion swaps one manifest atomically, and `psst rollback` swaps it back. The app ships with a snapshot and keeps the last good version it downloaded, so a bad or missing update never reaches anyone.
 
-## Compatibility
-
-The app reads `schemaVersion` 1. It shows content from newer formats as best it can: unknown categories and kinds get a neutral style, and entries it can't read are skipped instead of breaking the area. Format changes are agreed with the app first; see the guide, section 9.
+Backups run nightly to the server and to a private GitHub repository, and a restore is tested every week. See [docs/RESTORE.md](docs/RESTORE.md).
