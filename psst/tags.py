@@ -122,6 +122,7 @@ def merge(conn, source: str, target: str) -> None:
 def audit(conn) -> list[dict]:
     """Pairs of tags that look like the same thing, for a person to merge or leave alone."""
     conn.execute("SELECT set_config('pg_trgm.similarity_threshold', %s, true)", (str(SIMILARITY_THRESHOLD),))
+    # Passing a parameter also makes psycopg read the %% escapes below as the % operator.
     return conn.execute("""
         SELECT DISTINCT ON (least(a.tag_id, b.tag_id), greatest(a.tag_id, b.tag_id))
                a.tag_id AS a, ta.canonical_name AS a_name, b.tag_id AS b, tb.canonical_name AS b_name,
@@ -130,7 +131,9 @@ def audit(conn) -> list[dict]:
         JOIN tags ta ON ta.id = a.tag_id JOIN tags tb ON tb.id = b.tag_id
         WHERE coalesce(ta.description, '') NOT LIKE '%%' || b.tag_id || '%%'
           AND coalesce(tb.description, '') NOT LIKE '%%' || a.tag_id || '%%'
-        ORDER BY least(a.tag_id, b.tag_id), greatest(a.tag_id, b.tag_id), score DESC""").fetchall()
+          AND similarity(a.normalized, b.normalized) >= %s
+        ORDER BY least(a.tag_id, b.tag_id), greatest(a.tag_id, b.tag_id), score DESC""",
+                        (SIMILARITY_THRESHOLD,)).fetchall()
 
 
 def assign(conn, fact_id: str, tag_ids: list[str]) -> None:
