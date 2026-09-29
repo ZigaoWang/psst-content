@@ -65,7 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 command("db migrate", "Apply database migrations.")(cmd_db_migrate)
 command("import legacy", "Import schema 1 area files (idempotent).",
-        arg("--repo", default=str(LEGACY_REPO), help="repository with areas/ (default: this one)"))(cmd_import_legacy)
+        arg("--repo", default=str(LEGACY_REPO),
+            help="a checkout with areas/, for example of the legacy-areas tag (default: $PSST_LEGACY_REPO)"))(cmd_import_legacy)
 
 
 def main(argv: list[str] | None = None) -> int:
