@@ -48,3 +48,7 @@ uv run psst bundle                                  # snapshot production into t
 `psst publish` writes content format 2 (`format/v2/`) to staging on the server, downloads it back and checks it, and only then promotes it to production at `https://psst.zigao.wang/content/production/v2/`. Pack files are named by their hash and never change; promotion swaps one manifest atomically, and `psst rollback` swaps it back. The app ships with a snapshot and keeps the last good version it downloaded, so a bad or missing update never reaches anyone.
 
 Backups run nightly to the server and to a private GitHub repository, and a restore is tested every week. See [docs/RESTORE.md](docs/RESTORE.md).
+
+## Author
+
+Made by [Zigao Wang](https://www.zigao.wang). Contact: [a@zigao.wang](mailto:a@zigao.wang).
