@@ -1,7 +1,7 @@
 # Privacy: what to declare
 
 The public policy is `server/public/privacy/index.html`, served at https://psst.zigao.wang/privacy/ and
-linked from the app's About screen. This file maps it to App Store Connect's privacy questions. Update both
+linked from the app's Settings screen. This file maps it to App Store Connect's privacy questions. Update both
 whenever the app starts sending anything new.
 
 ## App Privacy ("nutrition label")

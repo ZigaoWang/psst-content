@@ -75,7 +75,10 @@ Every place gets its country, region, city, district, and neighborhood from its 
 
 - **Data:** Who's On First (public domain, multilingual) is loaded into `admin_areas`, with each area's placetype, multilingual names, parent, and geometry.
 - **Mapping:** WOF placetypes map to Psst levels: `country` to country, `region` to region, `locality` to city, `borough`, `county`, or `localadmin` to district, and `neighbourhood` or `macrohood` to neighborhood.
-- **Assignment:** the smallest WOF polygon of each level containing the point wins. Many WOF neighborhoods are points without a boundary. When no neighborhood polygon contains a place, it gets the nearest neighborhood point in the same city within 1.5 km, which is deterministic and data-driven. When WOF has nothing for a level, OpenStreetMap administrative boundaries are the fallback. Wikidata is used only for names.
+- **OpenStreetMap where it's better:** in mainland China, WOF has almost no districts or neighborhoods, so OSM administrative boundaries are loaded for each city (`psst hierarchy load-osm`; admin level 6 is a district, level 8 a neighborhood) and preferred per country and level (`PREFERRED_SOURCE`). A short list of boundaries that aren't really places people name (the River Thames is a WOF "neighbourhood") is excluded by id.
+- **Assignment:** the smallest polygon of each level containing the point wins, preferring the configured source. Many WOF neighborhoods are points without a boundary; when no neighborhood polygon contains a place, it gets the nearest neighborhood in the same city within 1.5 km, which is deterministic and data-driven. A district with the same name as its city, or covering nearly all of it, is dropped as meaningless.
+- **Speed:** every boundary is cut into small pieces (`admin_area_parts`, `ST_Subdivide`), so assigning all places takes seconds. `psst hierarchy index` rebuilds the pieces.
+- **Names:** English names come from Wikidata labels (with the official romanization, P402, where there's no English label). Suffixes such as "District" or "Qu" are stripped, and Chinese names without an English label are romanized to pinyin. Every other language comes from Wikidata and WOF.
 - **Rules:** nothing is assigned by hand or by a model. `psst hierarchy assign` runs after every import and every draft submission, and the `admin_assignment` column records which rule placed each level.
 
 ### Research cells
@@ -88,26 +91,26 @@ Research is split by an H3 grid at resolution 7 (hexagons of about 5 km², rough
 - `reviewed`
 - `done`
 
-It also records place and fact counts and the last research date. `psst coverage` renders an HTML map of every cell colored by state. People browsing the app never see cells.
+It also records the city it was planned for, the last research date, and the researcher's notes (including leads they looked at and cut). `psst research plan <city>` creates the cells covering a city boundary; cells that already held places before research by cell start as `done`. `psst coverage` renders an HTML map of every cell colored by state. People browsing the app never see cells.
 
 The Postgres H3 extension isn't packaged for this server, so cells are computed in Python with the `h3` library, and PostGIS stores their polygons for the coverage map. Nothing else depends on the extension.
 
 ### Reports and demand
 
-- `reports`: "Report a problem" from the app, with the fact id, a reason, an optional message, and the app version. A report never removes a fact by itself, because anyone can send one. It puts the fact on the review queue (`psst review reports`), where a reviewer confirms, fixes, or retires it.
-- `demand`: anonymous "no stories here yet" signals. When someone looks at a city-sized map area with no places, the app sends the H3 resolution 5 cell (about 250 km²), and nothing else. People can turn this off in Settings. It's declared in the privacy policy and the App Store privacy label.
+- `reports`: "Report a problem" from the app, with the fact id, a reason, an optional message, and the app version. A report never removes a fact by itself, because anyone can send one. It flags the fact (`needs_review`), which puts it first in `psst review next`, where a reviewer approves, fixes, or retires it. `psst review flag` does the same from the command line.
+- `demand`: anonymous "no stories here yet" signals. When someone looks at a city-sized map area with no places, the app sends the area's center rounded to 0.1 degrees (about 10 km), at most once per rounded point per day, and nothing else. The server turns it into an H3 resolution 5 cell (about 250 km²) and keeps only a count per cell per day. People can turn this off in Settings. It's declared in the privacy policy and the App Store privacy label.
 
 ## Pipeline
 
 Research agents never write SQL. They work through the CLI:
 
 1. `psst research claim` picks the next open cell, in priority order (demand, then neighbors of done cells, then everything else), marks it claimed, and writes a brief to `work/<cell>/`. The brief holds the cell's bounds, existing places, sweep candidates from OpenStreetMap and Wikipedia, and the tag vocabulary.
-2. The agent researches and writes `work/<cell>/drafts.json` (format in CONTENT_GUIDE.md). New places carry their Wikidata or OSM reference; additions to existing places carry the place id.
+2. The agent researches and writes `work/<cell>/draft.json` (`format/draft.schema.json`, explained in CONTENT_GUIDE.md). New places carry their Wikidata or OSM reference; additions to existing places carry the place id.
 3. `psst draft check` validates everything a script can check (the old validator's rules, plus duplicates against the database and tag ids against the vocabulary). `psst draft submit` stores the drafts with provenance. The pipeline can only ever create `draft` facts.
-4. `psst review next` hands a different run the drafts for a cell. It checks sources and statuses skeptically and writes a verdict for each fact: approve, fix, relabel as legend or disputed, or reject. `psst review apply` records the verdicts. Approved facts become `reviewed`.
+4. `psst review next` hands a different run the reported facts, then the drafts. It checks sources and veracity skeptically and writes a decision for each fact: approve, edit (which covers relabeling as legend or disputed), or reject, always with notes on what was checked. `psst review apply` checks every decision against the writing rules and records them all or none. Approved facts become `reviewed`; rejected ones are retired with the reason.
 5. `psst publish` moves reviewed facts to `published`, exports, uploads to staging, checks staging, and promotes to production.
 
-`psst` also has `places`, `facts`, `sources`, `tags`, `reports`, `stats`, `coverage`, `backup`, and `db` subcommands for inspection and repair.
+`psst` also has `status`, `places search`, `tags`, `reports list`, `review flag`, `coverage`, `backup`, `hierarchy`, `names`, and `db` commands. Every change goes through a command, is attributed to a run, and lands in `fact_events` (state changes, edits with the fields changed, and flags).
 
 ## App format
 
@@ -125,7 +128,7 @@ Research agents never write SQL. They work through the CLI:
 Before promotion, `psst publish` downloads the staging files over HTTPS and checks four things:
 
 - Every hash matches.
-- Every pack validates against `format/v2.schema.json`.
+- Every pack validates against its schema in `format/v2/`, and every reference resolves (places to areas, facts to tags).
 - Every legacy id still resolves.
 - The number of published places and facts hasn't dropped by more than 2 percent from production, unless `--allow-shrink` is given with a reason.
 
@@ -148,7 +151,7 @@ Search runs on the device over everything downloaded, so it works offline:
 
 ## Hosting
 
-- **Files:** nginx on the VPS serves `psst.zigao.wang`, with TLS from Let's Encrypt, a long cache for packs, and no cache for manifests.
+- **Files:** nginx on the VPS serves `psst.zigao.wang` (and `psst.67-230-170-225.sslip.io`, which works before DNS is set up), with TLS from Let's Encrypt, a long cache for packs, and no cache for manifests.
 - **Service:** `psst-api` is a small Python service run by systemd, reachable only through nginx, with nginx rate limits. It accepts reports and demand signals and writes them to the database with a role that can do nothing else.
 - **Isolation:** the database, role, directory (`/www/wwwroot/psst`), service, and nginx server block are all separate from the other sites on the box.
 - **Privacy:** the privacy policy is served at `https://psst.zigao.wang/privacy` and linked in the app. The App Store label declares:
@@ -162,7 +165,9 @@ Two copies, in two places:
 - **On the VPS:** `pg_dump` in custom format every night, 14 days kept.
 - **On GitHub:** a deterministic, sorted, plain-text export of every table, committed every night to the private `psst-db-backup` repository. Because it's sorted text, git stores only what changed each day, and every day can be restored. A clone on the Mac is a third copy, refreshed with `git pull`.
 
-`docs/RESTORE.md` explains both restores step by step. `psst backup test` restores the latest GitHub export into a scratch database and compares row counts and checksums with the live one. It was run as part of this change.
+The text export keeps only the boundaries places and research cells use, with their parents, since boundaries can be reloaded from their public sources. The dump leaves out `admin_area_parts`, which `psst hierarchy index` rebuilds.
+
+`docs/RESTORE.md` explains both restores step by step, and both were tested. `psst backup test` restores the latest GitHub export into a scratch database with every foreign key checked, exports it again, and compares every table byte for byte. It runs every Sunday from cron.
 
 ## Migration plan
 
