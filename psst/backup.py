@@ -2,7 +2,7 @@
 from one day to the next, and any day can be restored. See docs/RESTORE.md.
 
 Boundaries are large and can be reloaded from Who's On First and OpenStreetMap, so only the boundaries
-places actually use are included (enough for every foreign key to hold on restore).
+places and research cells use are included, with their parents, so every foreign key holds on restore.
 """
 
 from __future__ import annotations
@@ -34,7 +34,11 @@ TABLES = [
     ("demand", "cell, day"),
     ("publications", "id"),
 ]
-USED_AREAS = ("SELECT unnest(ARRAY[region_id, city_id, district_id, neighborhood_id]) FROM psst.places")
+USED_AREAS = """WITH RECURSIVE used(id) AS (
+        SELECT id FROM (SELECT unnest(ARRAY[region_id, city_id, district_id, neighborhood_id]) FROM psst.places
+                        UNION SELECT city_id FROM psst.research_cells) seed(id) WHERE id IS NOT NULL
+        UNION SELECT a.parent_id FROM psst.admin_areas a JOIN used u ON a.id = u.id WHERE a.parent_id IS NOT NULL)
+    SELECT id FROM used"""
 SERIALS = ["fact_events", "reports", "publications"]
 
 
@@ -77,8 +81,10 @@ def restore(conninfo: str, source: Path) -> None:
     """Load a text backup into an empty database that already has the schema (psst db migrate)."""
     with psycopg.connect(conninfo) as conn:
         with conn.transaction():
-            # Triggers would log a fresh event for every fact; the backup already has the real history.
-            conn.execute("SET session_replication_role = replica")
+            # Our triggers would log a fresh event for every fact; the backup already has the real history.
+            # Foreign keys stay on, so a restore that succeeds is also a consistent one.
+            for table, _ in TABLES:
+                conn.execute(f"ALTER TABLE psst.{table} DISABLE TRIGGER USER")
             for table, _ in TABLES:
                 path = source / f"{table}.csv"
                 header = path.open(encoding="utf-8").readline().strip()
@@ -89,7 +95,8 @@ def restore(conninfo: str, source: Path) -> None:
             for table in SERIALS:
                 conn.execute(f"SELECT setval(pg_get_serial_sequence('psst.{table}', 'id'), "
                              f"coalesce((SELECT max(id) FROM psst.{table}), 0) + 1, false)")
-            conn.execute("SET session_replication_role = origin")
+            for table, _ in TABLES:
+                conn.execute(f"ALTER TABLE psst.{table} ENABLE TRIGGER USER")
 
 
 def sudo_postgres(sql: str, database: str = "postgres") -> None:
