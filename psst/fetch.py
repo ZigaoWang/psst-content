@@ -4,9 +4,11 @@ and the output says so. Cite the original URL either way (guide, section 8)."""
 
 from __future__ import annotations
 
+import gzip
 import html
 import http.client
 import re
+import zlib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -73,11 +75,25 @@ def _get(url: str) -> tuple[int, str, bytes]:
     request = urllib.request.Request(url, headers={"User-Agent": net.USER_AGENT, "Accept": "text/html,*/*"})
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            return response.status, response.headers.get("Content-Type", ""), response.read(5_000_000)
+            body = response.read(5_000_000)
+            encoding = (response.headers.get("Content-Encoding") or "").lower()
+            return response.status, response.headers.get("Content-Type", ""), _decompress(body, encoding)
     except urllib.error.HTTPError as exc:
         return exc.code, "", b""
     except (OSError, ValueError, http.client.HTTPException):
         return 0, "", b""
+
+
+def _decompress(body: bytes, encoding: str) -> bytes:
+    """Archived copies come back exactly as captured, sometimes still compressed."""
+    try:
+        if body[:2] == b"\x1f\x8b" or "gzip" in encoding:
+            return gzip.decompress(body)
+        if "deflate" in encoding:
+            return zlib.decompress(body)
+    except (OSError, zlib.error):
+        pass
+    return body
 
 
 def _archive_copy(url: str) -> tuple[str, str] | None:

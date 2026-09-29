@@ -13,3 +13,10 @@ def test_pages_become_readable_text():
 
 def test_pdfs_are_flagged():
     assert "PDF" in fetch._page("https://example.org/a.pdf", 200, "application/pdf", b"%PDF-1.7").text
+
+
+def test_compressed_captures_are_read():
+    import gzip
+    body = gzip.compress(b"<html><body><p>Captured compressed.</p></body></html>")
+    page = fetch._page("https://example.org", 200, "text/html", fetch._decompress(body, ""))
+    assert "Captured compressed." in page.text
