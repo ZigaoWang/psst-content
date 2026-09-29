@@ -22,7 +22,11 @@ if [ ! -d "$base/backup/psst-db-backup/.git" ]; then
   git -C "$base/backup/psst-db-backup" config user.name "Psst backup"
   git -C "$base/backup/psst-db-backup" config user.email "backup@psst.invalid"
 fi
-[ -f "$base/coverage.htpasswd" ] || printf 'psst:%s\n' "$(openssl passwd -apr1 "$(openssl rand -hex 12)")" > "$base/coverage.htpasswd"
+# The coverage map's password is kept, readable by root only, in coverage.password (user name: psst).
+if [ ! -f "$base/coverage.password" ]; then
+  (umask 077; openssl rand -hex 12 > "$base/coverage.password")
+  printf 'psst:%s\n' "$(openssl passwd -apr1 "$(cat "$base/coverage.password")")" > "$base/coverage.htpasswd"
+fi
 
 install -m 644 server/psst-api.service /etc/systemd/system/psst-api.service
 systemctl daemon-reload
