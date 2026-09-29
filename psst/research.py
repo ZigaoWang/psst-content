@@ -232,7 +232,8 @@ out center tags;"""
         what = next((f"{k}={tags[k]}" for k in ("historic", "tourism", "railway", "public_transport", "amenity",
                                                  "building", "man_made", "shop", "memorial", "bridge") if k in tags), "")
         ref = f"{element['type']}/{element['id']}"
-        add(tags.get("wikidata") or ref, {"name": name, "localName": tags.get("name") if tags.get("name") != name else None,
+        # Long features (rail lines, roads) come in many segments with one name; one lead is enough.
+        add(tags.get("wikidata") or f"name:{name}", {"name": name, "localName": tags.get("name") if tags.get("name") != name else None,
                                           "lat": point["lat"], "lon": point["lon"], "osm": ref,
                                           "wikidata": tags.get("wikidata"), "what": what})
     return list(found.values()), problems
