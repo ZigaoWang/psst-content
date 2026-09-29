@@ -1,0 +1,2 @@
+# Psst nightly database backup (see server/backup.sh). 03:17 UTC, logged to /var/log/psst-backup.log.
+17 3 * * * root /usr/local/bin/psst-backup >> /var/log/psst-backup.log 2>&1

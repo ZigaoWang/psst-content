@@ -1,0 +1,19 @@
+[Unit]
+Description=Psst API (problem reports and coverage requests)
+After=network.target postgresql.service
+
+[Service]
+User=psst
+Group=psst
+EnvironmentFile=/www/wwwroot/psst/api.env
+ExecStart=/www/wwwroot/psst/app/.venv/bin/python /www/wwwroot/psst/app/server/api.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/www/wwwroot/psst/app
+
+[Install]
+WantedBy=multi-user.target

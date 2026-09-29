@@ -238,3 +238,75 @@ def tags_apply(args) -> int:
         tags.assign_many(conn, {fact: list(tag_ids) for fact, tag_ids in assignments.items()})
     print(f"Tagged {len(assignments)} facts.")
     return 0
+
+
+# Backups ---------------------------------------------------------------------------------------------
+
+@command("backup export", "Write the database as sorted CSV files (the nightly GitHub backup).",
+         arg("--to", required=True, help="directory to write into"))
+def backup_export(args) -> int:
+    from . import backup
+    with db.connect() as conn:
+        digests = backup.export(conn, Path(args.to))
+    print(f"Exported {len(digests)} tables to {args.to}.")
+    return 0
+
+
+@command("backup restore", "Restore a text backup into a new, empty database (run on the VPS as root).",
+         arg("--from", dest="source", required=True, help="a backup directory (a psst-db-backup checkout)"),
+         arg("--database", required=True, help="name of the database to create, e.g. psst_restored"))
+def backup_restore(args) -> int:
+    from . import backup
+    _create_database(args.database)
+    backup.restore(_database_url(args.database), Path(args.source))
+    print(f"Restored into {args.database}. See docs/RESTORE.md for switching over.")
+    return 0
+
+
+@command("backup test", "Restore the latest backup into a scratch database and prove it matches (VPS only).",
+         arg("--from", dest="source", default="/www/wwwroot/psst/backup/psst-db-backup",
+             help="the backup to test (default: the nightly GitHub backup checkout)"))
+def backup_test(args) -> int:
+    import hashlib
+    import tempfile
+    from . import backup
+    name = "psst_restore_test"
+    source = Path(args.source)
+    expected = {t: hashlib.sha256((source / f"{t}.csv").read_bytes()).hexdigest() for t, _ in backup.TABLES}
+    backup.sudo_postgres(f"DROP DATABASE IF EXISTS {name}")
+    try:
+        _create_database(name)
+        backup.restore(_database_url(name), source)
+        import psycopg
+        from psycopg.rows import dict_row
+        with psycopg.connect(_database_url(name), row_factory=dict_row) as conn, \
+                tempfile.TemporaryDirectory() as scratch:
+            actual = backup.export(conn, Path(scratch))
+            counts = {t: conn.execute(f"SELECT count(*) AS n FROM psst.{t}").fetchone()["n"] for t, _ in backup.TABLES}
+    finally:
+        backup.sudo_postgres(f"DROP DATABASE IF EXISTS {name}")
+    mismatched = [t for t in expected if expected[t] != actual.get(t)]
+    for table, _ in backup.TABLES:
+        print(f"  {table:<18} {counts[table]:>8} rows  {'ok' if table not in mismatched else 'MISMATCH'}")
+    if mismatched:
+        print(f"Restore test FAILED: {', '.join(mismatched)} differ after restoring.")
+        return 1
+    print("Restore test passed: every table restored byte for byte.")
+    return 0
+
+
+def _database_url(name: str) -> str:
+    import urllib.parse
+    base = db.conninfo()
+    if base.startswith("postgresql://"):
+        parsed = urllib.parse.urlsplit(base)
+        return urllib.parse.urlunsplit(parsed._replace(path=f"/{name}"))
+    return base.replace("dbname=psst", f"dbname={name}")
+
+
+def _create_database(name: str) -> None:
+    from . import backup
+    backup.sudo_postgres(f"CREATE DATABASE {name} OWNER psst ENCODING 'UTF8' TEMPLATE template0")
+    backup.sudo_postgres("CREATE EXTENSION postgis; CREATE EXTENSION pg_trgm; CREATE EXTENSION unaccent;", name)
+    backup.sudo_postgres(f"REVOKE ALL ON DATABASE {name} FROM PUBLIC; GRANT CONNECT ON DATABASE {name} TO psst, psst_api;")
+    db.migrate(_database_url(name))

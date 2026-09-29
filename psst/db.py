@@ -92,10 +92,10 @@ def connect(actor: str | None = None, run: str | None = None, note: str | None =
             yield conn
 
 
-def migrate() -> list[str]:
+def migrate(target: str | None = None) -> list[str]:
     """Apply every migration in db/migrations that hasn't been applied yet, in order."""
     applied_now = []
-    with psycopg.connect(conninfo(), autocommit=True) as conn:
+    with psycopg.connect(target or conninfo(), autocommit=True) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS public.psst_schema_migrations "
                      "(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
         done = {row[0] for row in conn.execute("SELECT version FROM public.psst_schema_migrations")}
