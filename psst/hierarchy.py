@@ -54,7 +54,8 @@ def read_wof(path: Path, country: str):
         SELECT s.id, s.placetype, s.name, s.parent_id, json_extract(g.body, '$.geometry')
         FROM spr s JOIN geojson g ON g.id = s.id AND g.is_alt = 0
         WHERE s.placetype IN ({placetypes}) AND s.is_deprecated = 0 AND s.is_current != 0
-          AND s.is_superseded = 0 AND s.country = ?""", (country,))
+          AND s.is_superseded = 0 AND s.country = ?
+          AND json_extract(g.body, '$.geometry.type') IS NOT NULL""", (country,))
     for area_id, placetype, name, parent_id, geometry in rows:
         names: dict[str, str] = {}
         for language, script, region, name_text in db.execute(
@@ -80,9 +81,14 @@ def load_wof(conn, path: Path, country: str) -> int:
         # Places keep pointing at areas that still exist; anything this bundle no longer has is dropped.
         cur.execute("""
             INSERT INTO admin_areas (id, source, placetype, level, name, country_code, parent_id, geom, area_km2, license)
-            SELECT id, 'wof', placetype, level, name, %(country)s, nullif(parent_id, -1),
-                   ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(geometry), 4326)), NULL, 'CC0-1.0'
-            FROM s_wof
+            SELECT id, 'wof', placetype, level, name, %(country)s, nullif(parent_id, -1), geom, NULL, 'CC0-1.0'
+            FROM (
+                SELECT *, CASE WHEN GeometryType(raw) = 'POINT' THEN raw
+                               ELSE ST_Multi(ST_CollectionExtract(ST_MakeValid(raw), 3)) END AS geom
+                FROM (SELECT *, ST_SetSRID(ST_GeomFromGeoJSON(geometry), 4326) AS raw FROM s_wof) parsed
+            ) repaired
+            -- A few boundaries are degenerate slivers that repair to nothing; they can't contain anything.
+            WHERE geom IS NOT NULL AND NOT ST_IsEmpty(geom)
             ON CONFLICT (id) DO UPDATE SET placetype = EXCLUDED.placetype, level = EXCLUDED.level,
                 name = EXCLUDED.name, parent_id = EXCLUDED.parent_id, geom = EXCLUDED.geom""", {"country": country})
         cur.execute("""UPDATE admin_areas SET area_km2 = CASE WHEN is_point THEN 0
@@ -90,7 +96,8 @@ def load_wof(conn, path: Path, country: str) -> int:
                        WHERE country_code = %s AND source = 'wof'""", (country,))
         cur.execute("DELETE FROM admin_area_names WHERE area_id IN (SELECT id FROM s_wof)")
         cur.execute("""INSERT INTO admin_area_names (area_id, lang, name)
-                       SELECT s.id, n.key, n.value FROM s_wof s, jsonb_each_text(s.names) n""")
+                       SELECT s.id, n.key, n.value FROM s_wof s JOIN admin_areas a ON a.id = s.id,
+                              jsonb_each_text(s.names) n""")
     return count
 
 
