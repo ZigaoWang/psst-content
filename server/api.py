@@ -77,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._report(body)
             if self.path == "/api/v1/demand":
                 return self._demand(body)
-        except psycopg.errors.RaiseException:
+        except (psycopg.errors.RaiseException, psycopg.errors.NoDataFound, psycopg.errors.InvalidParameterValue):
             return self._reply(422, {"error": "rejected"})
         except psycopg.Error:
             log.exception("database error")
