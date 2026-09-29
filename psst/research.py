@@ -47,7 +47,8 @@ def find_city(conn, name: str, country: str | None = None) -> dict:
 
 
 def plan(conn, city: dict) -> dict[str, int]:
-    """Create the research cells covering a city. Cells that already hold places start as done."""
+    """Create the research cells covering a city. Every cell starts open, including ones that already hold
+    places: those get a full pass that tops them up."""
     ring = [(city["south"], city["west"]), (city["south"], city["east"]), (city["north"], city["east"]),
             (city["north"], city["west"])]
     candidates = h3.geo_to_cells(h3.LatLngPoly(ring), cells.RESEARCH_RESOLUTION)
@@ -66,16 +67,10 @@ def plan(conn, city: dict) -> dict[str, int]:
             ON CONFLICT (cell) DO UPDATE SET city_id = coalesce(research_cells.city_id, EXCLUDED.city_id)""",
                     (cells.RESEARCH_RESOLUTION, city["id"], city["id"]))
         added = cur.rowcount
-        cur.execute("""
-            UPDATE research_cells rc SET state = 'done', notes = coalesce(rc.notes,
-                       'Researched as part of an area file, before research by cell.'),
-                   last_researched_at = x.last
-            FROM (SELECT p.h3_cell, max(f.researched_at)::timestamptz AS last FROM places p
-                  JOIN facts f ON f.place_id = p.id AND f.state = 'published'
-                  WHERE p.state = 'active' GROUP BY p.h3_cell) x
-            WHERE x.h3_cell = rc.cell AND rc.state = 'open' AND rc.city_id = %s""", (city["id"],))
-        done = cur.rowcount
-    return {"cells": added, "already_done": done}
+        started = cur.execute("""SELECT count(*) AS n FROM research_cells rc WHERE rc.city_id = %s
+                                 AND EXISTS (SELECT 1 FROM places p WHERE p.h3_cell = rc.cell AND p.state = 'active')""",
+                              (city["id"],)).fetchone()["n"]
+    return {"cells": added, "with_places": started}
 
 
 # Demand ------------------------------------------------------------------------------------------------
@@ -141,10 +136,14 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
         demand = {r["cell"]: r["n"] for r in conn.execute(
             "SELECT cell, sum(count) AS n FROM demand WHERE day > current_date - %s GROUP BY cell", (DEMAND_DAYS,))}
         done = {r["cell"] for r in conn.execute("SELECT cell FROM research_cells WHERE state = 'done'")}
+        existing = {r["h3_cell"]: r["n"] for r in conn.execute(
+            "SELECT h3_cell, count(*) AS n FROM places WHERE state = 'active' GROUP BY h3_cell")}
 
+        # Where people looked first; then cells that already show rich content (they're dense areas that
+        # were only partly covered); then next to finished cells, so coverage grows outward evenly.
         def priority(c: str) -> tuple:
             parent = h3.cell_to_parent(c, cells.DEMAND_RESOLUTION)
-            return (-demand.get(parent, 0), -sum(n in done for n in cells.neighbors(c)), c)
+            return (-demand.get(parent, 0), -existing.get(c, 0), -sum(n in done for n in cells.neighbors(c)), c)
 
         cell = min((r["cell"] for r in open_cells), key=priority)
     conn.execute("""UPDATE research_cells SET state = 'claimed', claimed_by_run = %s,
@@ -184,8 +183,8 @@ def brief(conn, cell: str, sweep: bool = True) -> dict:
         ORDER BY p.h3_cell <> %s, dn.name""", (cell, list(nearby), cell)).fetchall()
     hoods = [r["name"] for r in conn.execute("""
         SELECT DISTINCT a.name FROM admin_area_parts ap JOIN admin_areas a ON a.id = ap.area_id
-        WHERE a.level = 'neighborhood' AND ST_Intersects(ap.geom, ST_GeomFromText(%s, 4326))
-        ORDER BY a.name""", (cells.polygon_wkt(cell),))]
+        WHERE a.level = 'neighborhood' AND a.id <> ALL(%s) AND ST_Intersects(ap.geom, ST_GeomFromText(%s, 4326))
+        ORDER BY a.name""", (list(hierarchy.EXCLUDED_AREAS), cells.polygon_wkt(cell)))]
     result = {
         "cell": cell, "state": row["state"], "city": row["city"], "countryCode": row["country_code"],
         "center": {"lat": round(lat, 6), "lon": round(lon, 6)},
@@ -213,7 +212,7 @@ def _sweep(cell: str, country: str | None) -> tuple[list[dict], list[str]]:
     def add(key: str, entry: dict) -> None:
         if h3.latlng_to_cell(entry["lat"], entry["lon"], cells.RESEARCH_RESOLUTION) != cell:
             return
-        merged = found.setdefault(key, {"name": entry["name"], "lat": round(entry["lat"], 6),
+        merged = found.setdefault(key, {"key": key, "name": entry["name"], "lat": round(entry["lat"], 6),
                                         "lon": round(entry["lon"], 6)})
         for k, v in entry.items():
             if v and not merged.get(k):
@@ -267,6 +266,59 @@ out center tags;"""
     return list(found.values()), problems
 
 
+def store_leads(conn, cell: str, candidates: list[dict], run_id: str) -> dict[str, int]:
+    """Record a cell's leads. Leads from earlier passes keep what happened to them."""
+    for c in candidates:
+        conn.execute("""
+            INSERT INTO research_leads (cell, key, name, wikidata, osm, url, what, status, run_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (cell, key) DO UPDATE SET name = EXCLUDED.name, wikidata = EXCLUDED.wikidata, osm = EXCLUDED.osm,
+                url = EXCLUDED.url, what = EXCLUDED.what,
+                status = CASE WHEN research_leads.status = 'open' THEN EXCLUDED.status ELSE research_leads.status END""",
+                     (cell, c["key"], c["name"], c.get("wikidata"), c.get("osm"), c.get("wikipedia"), c.get("what"),
+                      "known" if c.get("known") else "open", run_id))
+    return {r["status"]: r["n"] for r in conn.execute(
+        "SELECT status, count(*) AS n FROM research_leads WHERE cell = %s GROUP BY status", (cell,))}
+
+
+def open_leads(conn, cell: str) -> list[dict]:
+    return conn.execute("SELECT * FROM research_leads WHERE cell = %s AND status = 'open' ORDER BY name",
+                        (cell,)).fetchall()
+
+
+def account_for_leads(conn, draft: dict, positions: dict) -> tuple[dict[str, tuple[str, str | None]], list[dict]]:
+    """Which open leads this draft covers, and how (status, reason); and the ones it leaves unaccounted."""
+    refs = set()
+    for index, place in enumerate(draft["places"]):
+        refs.update(r for r in (place.get("wikidata"), place.get("osm")) if r)
+        if "place" in place:
+            row = conn.execute("SELECT wikidata_id, osm_ref FROM places WHERE id = %s", (place["place"],)).fetchone()
+            if row:
+                refs.update(r for r in (row["wikidata_id"], row["osm_ref"]) if r)
+    nearby = list(h3.grid_disk(draft["cell"], 1))
+    known = {r for row in conn.execute("SELECT wikidata_id, osm_ref FROM places WHERE h3_cell = ANY(%s) AND state = 'active'",
+                                       (nearby,)) for r in (row["wikidata_id"], row["osm_ref"]) if r}
+    skipped: dict[str, str] = {}
+    for item in draft.get("skipped", []):
+        for label in [item.get("name")] + item.get("names", []) + [item.get("wikidata"), item.get("osm")]:
+            if label:
+                skipped[label.casefold()] = item["reason"]
+    added_names = {p["name"].casefold() for p in draft["places"] if p.get("name")}
+    covered: dict[str, tuple[str, str | None]] = {}
+    missing = []
+    for lead in open_leads(conn, draft["cell"]):
+        ids = {r for r in (lead["wikidata"], lead["osm"]) if r}
+        if ids & refs or lead["name"].casefold() in added_names:
+            covered[lead["key"]] = ("added", None)
+        elif ids & known:
+            covered[lead["key"]] = ("known", None)
+        elif reason := next((skipped[x.casefold()] for x in [lead["name"], lead["key"], *ids] if x.casefold() in skipped), None):
+            covered[lead["key"]] = ("skipped", reason)
+        else:
+            missing.append(lead)
+    return covered, missing
+
+
 def write_brief(data: dict, directory: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "brief.json").write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str) + "\n")
@@ -284,12 +336,21 @@ def write_brief(data: dict, directory: Path) -> Path:
         lines.append(f"- {p['id']} {p['name']}{where} [{p['kind']}] {refs}")
         for f in p["facts"]:
             lines.append(f"  - {f['category']}, {f['state']}: {f['headline']}")
-    lines += ["", "## Leads (not yet checked; most will be cut)", ""]
+    open_keys = {lead["key"] for lead in data.get("openLeads", [])}
+    lines += ["", "## Leads to account for", "",
+              "Every lead marked TODO must end up in the draft: added as a place, or in `skipped` with a reason "
+              "(one reason can cover several with `names`). `psst draft check` lists any that are left. Leads are "
+              "only a start: also look for places the sweep can't see (guide, section 5).", ""]
     for c in data["candidates"]:
         refs = " ".join(x for x in (c.get("wikidata"), c.get("osm")) if x)
-        flag = " (already in Psst)" if c["known"] else ""
+        if c["known"]:
+            flag = "(already in Psst)"
+        elif c["key"] in open_keys or not open_keys:
+            flag = "TODO"
+        else:
+            flag = "(handled in an earlier pass)"
         extra = " ".join(x for x in (c.get("what"), c.get("wikipedia")) if x)
-        lines.append(f"- {c['name']}{flag} {refs} {extra}".rstrip())
+        lines.append(f"- {flag} {c['name']} {refs} {extra}".rstrip())
     if data["sweepProblems"]:
         lines += ["", "## Sweep problems", ""] + [f"- {p}" for p in data["sweepProblems"]]
     path = directory / "brief.md"
@@ -347,6 +408,14 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
     headlines = [f["headline"] for p in draft["places"] for f in p["facts"]]
     for repeated in sorted({h for h in headlines if headlines.count(h) > 1}):
         report.error("draft", f"headline used twice: {repeated!r}")
+
+    if report.ok:
+        _, missing = account_for_leads(conn, draft, {})
+        if missing:
+            shown = ", ".join(f"{m['name']} ({m['wikidata'] or m['osm'] or m['key']})" for m in missing[:25])
+            report.error("leads", f"{len(missing)} leads from the brief aren't accounted for: {shown}"
+                         + (" and more" if len(missing) > 25 else "")
+                         + ". Add each as a place, or list it in skipped with a reason (see the guide, section 11).")
 
     positions: dict[int, coords.Position] = {}
     if online and new_places and report.ok:
@@ -464,9 +533,15 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
             pass  # Wikidata unavailable: the boundary names from the data files stay; nothing depends on it.
     notes = draft.get("notes", "")
     if draft.get("skipped"):
-        notes += ("\n" if notes else "") + "Skipped: " + "; ".join(f"{s['name']} ({s['reason']})" for s in draft["skipped"])
+        notes += ("\n" if notes else "") + "Skipped: " + "; ".join(
+            f"{', '.join(s.get('names') or [s.get('name') or s.get('wikidata') or s.get('osm')])} ({s['reason']})"
+            for s in draft["skipped"])
+    covered, _ = account_for_leads(conn, draft, checked.positions)
+    for key, (status, reason) in covered.items():
+        conn.execute("UPDATE research_leads SET status = %s, reason = %s, run_id = %s WHERE cell = %s AND key = %s",
+                     (status, reason, run["id"], draft["cell"], key))
     # A cell with nothing worth adding is finished; otherwise it waits for review.
-    conn.execute("""UPDATE research_cells SET state = %s, claimed_by_run = NULL, claimed_until = NULL,
+    conn.execute("""UPDATE research_cells SET state = %s, claimed_by_run = NULL, claimed_until = NULL, passes = passes + 1,
                     last_researched_at = now(), notes = nullif(%s, '') WHERE cell = %s""",
                  ("drafted" if counts["facts"] else "done", notes, draft["cell"]))
     counts["new_place_ids"] = new_place_ids

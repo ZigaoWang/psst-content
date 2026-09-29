@@ -382,7 +382,7 @@ def city_add(args) -> int:
     result = cities.add(db.connect, publish.settings()["host"], args.name, args.country, args.reload)
     city = result["city"]
     print(f"{city['name']} ({city['country_code']}) is ready: {result['cells']} research cells, "
-          f"{result['already_done']} already covered.")
+          f"{result['with_places']} with places already.")
     print(f'Research it with: uv run psst research claim --city "{city["name"]}"')
     return 0
 
@@ -416,7 +416,7 @@ def research_plan(args) -> int:
         city = research.find_city(conn, args.city, args.country and args.country.upper())
         result = research.plan(conn, city)
     print(f"{city['name']} ({city['country_code']}): {result['cells']} cells planned, "
-          f"{result['already_done']} already researched.")
+          f"{result['with_places']} with places already.")
     return 0
 
 
@@ -476,8 +476,12 @@ def research_claim(args) -> int:
           f"It has {cell['places']} places and {cell['published']} published facts.")
     with db.connect() as conn:
         data = research.brief(conn, cell["cell"], sweep=not args.no_sweep)
+    with db.connect(actor="research", run=args.run) as conn:
+        leads = research.store_leads(conn, cell["cell"], data["candidates"], args.run)
+        data["openLeads"] = research.open_leads(conn, cell["cell"])
     path = research.write_brief(data, WORK / cell["cell"])
-    print(f"Brief: {path} ({len(data['existingPlaces'])} places nearby, {len(data['candidates'])} leads).")
+    print(f"Brief: {path} ({len(data['existingPlaces'])} places nearby, {leads.get('open', 0)} leads to account for, "
+          f"{leads.get('known', 0)} already in Psst).")
     print(f"Write the draft to {WORK / cell['cell'] / 'draft.json'} (format/draft.schema.json).")
     return 0
 

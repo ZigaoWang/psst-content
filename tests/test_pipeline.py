@@ -218,3 +218,37 @@ def test_samples_are_random(scratch):
     first = [r["id"] for r in review.queue(scratch, 30, reviewer_run=reviewer["id"], verify=True, sample=True)]
     second = [r["id"] for r in review.queue(scratch, 30, reviewer_run=reviewer["id"], verify=True, sample=True)]
     assert len(first) == 30 and first != second
+
+
+def test_every_lead_must_be_accounted_for(scratch, cell, tag_id):
+    researcher = start(scratch, "research", "test-researcher")
+    research.claim(scratch, researcher["id"], cell=cell)
+    leads = [{"key": "Q999999999", "name": "Test Bench", "wikidata": "Q999999999", "known": False},
+             {"key": "name:Corner Shop", "name": "Corner Shop", "osm": "node/999999991", "known": False},
+             {"key": "Q999999997", "name": "Old Ward", "wikidata": "Q999999997", "known": False},
+             {"key": "Q999999996", "name": "Bus Garage", "wikidata": "Q999999996", "known": False}]
+    research.store_leads(scratch, cell, leads, researcher["id"])
+
+    draft = draft_for(cell, tag_id)  # adds Test Bench, skips "A shop"
+    report = research.check(scratch, draft, online=False).report
+    assert any("aren't accounted for" in e and "Corner Shop" in e and "Old Ward" in e for e in report.errors)
+
+    draft["skipped"] = [{"name": "Corner Shop", "reason": "Nothing surprising in the sources."},
+                        {"names": ["Old Ward", "Bus Garage"], "reason": "Not physical places, or nothing to say."}]
+    checked = research.check(scratch, draft, online=False)
+    assert checked.report.ok, checked.report.errors
+    checked.positions = {0: position_in(cell)}
+    research.submit(scratch, draft, researcher, checked)
+    statuses = {r["key"]: r["status"] for r in scratch.execute("SELECT key, status FROM research_leads WHERE cell = %s", (cell,))}
+    assert statuses == {"Q999999999": "added", "name:Corner Shop": "skipped", "Q999999997": "skipped",
+                        "Q999999996": "skipped"}
+    assert scratch.execute("SELECT passes FROM research_cells WHERE cell = %s", (cell,)).fetchone()["passes"] == 1
+
+
+def test_a_second_pass_keeps_earlier_decisions(scratch, cell):
+    researcher = start(scratch, "research", "test-researcher")
+    lead = {"key": "Q999999995", "name": "Old Pump", "wikidata": "Q999999995", "known": False}
+    research.store_leads(scratch, cell, [lead], researcher["id"])
+    scratch.execute("UPDATE research_leads SET status = 'skipped', reason = 'Nothing holds up.' WHERE key = 'Q999999995'")
+    research.store_leads(scratch, cell, [lead], researcher["id"])
+    assert research.open_leads(scratch, cell) == []
