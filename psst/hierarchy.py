@@ -85,6 +85,24 @@ def read_wof(path: Path, country: str):
     db.close()
 
 
+# Boundaries are cut into pieces of at most this many points; testing a point against a few hundred
+# vertices instead of a whole country's outline is what makes assigning places fast.
+PART_POINTS = 256
+
+
+def index_parts(conn, area_ids: list[int] | None = None) -> int:
+    """Rebuild the lookup pieces (admin_area_parts) for these boundaries, or for all of them."""
+    where = "id = ANY(%(ids)s)" if area_ids is not None else "true"
+    conn.execute(f"DELETE FROM admin_area_parts WHERE {'area_id = ANY(%(ids)s)' if area_ids is not None else 'true'}",
+                 {"ids": area_ids})
+    cur = conn.execute(f"""
+        INSERT INTO admin_area_parts (area_id, geom)
+        SELECT id, (ST_Dump(ST_Subdivide(ST_CollectionExtract(geom, 3), %(points)s))).geom
+        FROM admin_areas WHERE NOT is_point AND {where}""", {"ids": area_ids, "points": PART_POINTS})
+    return conn.execute(f"SELECT count(DISTINCT area_id) AS n FROM admin_area_parts WHERE "
+                        f"{'area_id = ANY(%(ids)s)' if area_ids is not None else 'true'}", {"ids": area_ids}).fetchone()["n"]
+
+
 def load_wof(conn, path: Path, country: str) -> int:
     """Replace this country's Who's On First boundaries with the bundle's. `conn` is an open transaction."""
     count = 0
