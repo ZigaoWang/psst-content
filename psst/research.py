@@ -382,6 +382,9 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
     """Every check a draft must pass before it's stored. Errors block; warnings are for the reviewer."""
     report = rules.Report()
     for error in sorted(jsonschema.Draft202012Validator(DRAFT_SCHEMA).iter_errors(draft), key=lambda e: e.path):
+        # "Not valid under any of the given schemas" says nothing; report the most specific reason instead.
+        if error.context:
+            error = max(error.context, key=lambda e: len(e.absolute_path))
         where = "/".join(str(p) for p in error.absolute_path) or "draft"
         report.error(where, error.message)
     if not report.ok:
