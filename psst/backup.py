@@ -3,6 +3,11 @@ from one day to the next, and any day can be restored. See docs/RESTORE.md.
 
 Boundaries are large and can be reloaded from Who's On First and OpenStreetMap, so only the boundaries
 places and research cells use are included, with their parents, so every foreign key holds on restore.
+Countries and regions are kept as their bounding boxes (their full shapes run to megabytes each); reloading
+boundaries after a restore puts the real shapes back (docs/RESTORE.md).
+
+Each backup records the migrations it was taken with (SCHEMA_VERSION). A restore recreates exactly that
+schema, loads the data, and only then migrates forward.
 """
 
 from __future__ import annotations
@@ -53,7 +58,12 @@ def _select(conn, table: str, order: str) -> str:
     columns = []
     for name in _columns(conn, table):
         # Geometry goes out as EWKT text, which COPY reads straight back into a geometry column.
-        columns.append(f"ST_AsEWKT({name}) AS {name}" if name == "geom" else name)
+        if name != "geom":
+            columns.append(name)
+        elif table == "admin_areas":
+            columns.append("ST_AsEWKT(CASE WHEN level IN ('country', 'region') THEN ST_Envelope(geom) ELSE geom END) AS geom")
+        else:
+            columns.append(f"ST_AsEWKT({name}) AS {name}")
     where = f" WHERE id IN ({USED_AREAS})" if table == "admin_areas" else ""
     if table == "admin_area_names":
         where = f" WHERE area_id IN ({USED_AREAS})"
@@ -75,6 +85,11 @@ def export(conn, target: Path) -> dict[str, str]:
     (target / "SCHEMA_VERSION").write_text("\n".join(r["version"] if isinstance(r, dict) else r[0]
                                                       for r in migrations) + "\n")
     return digests
+
+
+def schema_version(source: Path) -> list[str]:
+    """The migrations a backup was taken with."""
+    return [line.strip() for line in (source / "SCHEMA_VERSION").read_text().splitlines() if line.strip()]
 
 
 def restore(conninfo: str, source: Path) -> None:

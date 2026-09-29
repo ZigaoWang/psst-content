@@ -582,9 +582,12 @@ def backup_export(args) -> int:
          arg("--database", required=True, help="name of the database to create, e.g. psst_restored"))
 def backup_restore(args) -> int:
     from . import backup
-    _create_database(args.database)
-    backup.restore(_database_url(args.database), Path(args.source))
-    print(f"Restored into {args.database}. See docs/RESTORE.md for switching over.")
+    source = Path(args.source)
+    _create_database(args.database, backup.schema_version(source))
+    backup.restore(_database_url(args.database), source)
+    applied = db.migrate(_database_url(args.database))
+    print(f"Restored into {args.database}" + (f", then applied {', '.join(applied)}" if applied else "")
+          + ". See docs/RESTORE.md for switching over.")
     return 0
 
 
@@ -600,7 +603,7 @@ def backup_test(args) -> int:
     expected = {t: hashlib.sha256((source / f"{t}.csv").read_bytes()).hexdigest() for t, _ in backup.TABLES}
     backup.sudo_postgres(f"DROP DATABASE IF EXISTS {name}")
     try:
-        _create_database(name)
+        _create_database(name, backup.schema_version(source))
         backup.restore(_database_url(name), source)
         import psycopg
         from psycopg.rows import dict_row
@@ -629,12 +632,12 @@ def _database_url(name: str) -> str:
     return base.replace("dbname=psst", f"dbname={name}")
 
 
-def _create_database(name: str) -> None:
+def _create_database(name: str, migrations: list[str] | None = None) -> None:
     from . import backup
     backup.sudo_postgres(f"CREATE DATABASE {name} OWNER psst ENCODING 'UTF8' TEMPLATE template0")
     backup.sudo_postgres("CREATE EXTENSION postgis; CREATE EXTENSION pg_trgm; CREATE EXTENSION unaccent;", name)
     backup.sudo_postgres(f"REVOKE ALL ON DATABASE {name} FROM PUBLIC; GRANT CONNECT ON DATABASE {name} TO psst, psst_api;")
-    db.migrate(_database_url(name))
+    db.migrate(_database_url(name), migrations)
 
 
 # Publishing ------------------------------------------------------------------------------------------

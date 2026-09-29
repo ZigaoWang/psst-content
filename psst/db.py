@@ -92,15 +92,16 @@ def connect(actor: str | None = None, run: str | None = None, note: str | None =
             yield conn
 
 
-def migrate(target: str | None = None) -> list[str]:
-    """Apply every migration in db/migrations that hasn't been applied yet, in order."""
+def migrate(target: str | None = None, only: list[str] | None = None) -> list[str]:
+    """Apply every migration in db/migrations that hasn't been applied yet, in order. With `only`, apply
+    just those (a restore recreates the schema a backup was taken with before migrating forward)."""
     applied_now = []
     with psycopg.connect(target or conninfo(), autocommit=True) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS public.psst_schema_migrations "
                      "(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
         done = {row[0] for row in conn.execute("SELECT version FROM public.psst_schema_migrations")}
         for path in sorted(MIGRATIONS.glob("*.sql")):
-            if path.stem in done:
+            if path.stem in done or (only is not None and path.stem not in only):
                 continue
             with conn.transaction():
                 conn.execute(path.read_text())
