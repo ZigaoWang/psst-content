@@ -2,6 +2,10 @@
 
 This repository is the Psst content pipeline: the `psst` command, the database schema, the app content format, and the server setup. The content itself (places and stories) lives in the database on the Psst server, never in files here. The facts are the product.
 
+## If you were asked to do something
+
+Short requests like "seed london", "seed hong kong, 5 cells", "review", "check the old content", or "status": follow `START.md`.
+
 ## Before you start
 
 - Read `CONTENT_GUIDE.md` in full. It's the spec for researching, reviewing, and publishing, and it explains every command you need. You shouldn't need to read the code.

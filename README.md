@@ -18,9 +18,10 @@ Setup (the database password and SSH access) is in [CONTENT_GUIDE.md](CONTENT_GU
 
 ## Doing the work
 
-[CONTENT_GUIDE.md](CONTENT_GUIDE.md) is the handbook for researching a cell, reviewing drafts and problem reports, tagging, and publishing. In short:
+To do the work, open Claude Code in this folder and say what you want, for example `seed london`, `seed hong kong, 5 cells`, `review`, or `status`. [START.md](START.md) tells the session how; [CONTENT_GUIDE.md](CONTENT_GUIDE.md) is the rulebook it follows. The commands underneath:
 
 ```
+uv run psst city add "Hong Kong" --country HK       # set up a city (once)
 export PSST_RUN=$(uv run psst run start --kind research --model <model>)
 uv run psst research claim --city London           # claim a cell, get a brief in work/<cell>/
 uv run psst draft check work/<cell>/draft.json      # every rule a script can check
