@@ -4,3 +4,5 @@
 47 4 * * 0 root /usr/local/bin/psst-restore-test >> /var/log/psst-backup.log 2>&1
 # Every Saturday, check every cited link and flag facts whose sources failed twice in a row.
 37 5 * * 6 root cd /www/wwwroot/psst/app && PSST_CONFIG=/www/wwwroot/psst/.env LC_ALL=C.UTF-8 /root/.local/bin/uv run --no-dev psst sources check >> /var/log/psst-links.log 2>&1
+# Every 10 minutes, rebuild the admin page at /admin/ from the database (psst/admin.py).
+*/10 * * * * root cd /www/wwwroot/psst/app && PSST_CONFIG=/www/wwwroot/psst/.env LC_ALL=C.UTF-8 /root/.local/bin/uv run --no-dev psst admin --out /www/wwwroot/psst/public/admin >> /var/log/psst-admin.log 2>&1
