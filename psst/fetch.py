@@ -210,7 +210,44 @@ def _read(url: str, archive: bool = False) -> Page:
                  archived_at=f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}")
 
 
-def render(page: Page, limit: int, links: bool = False) -> str:
+STOPWORDS = {"the", "and", "for", "was", "were", "that", "this", "with", "from", "into", "its", "his", "her",
+             "their", "they", "been", "has", "had", "are", "but", "not", "who", "which", "when", "where", "one"}
+
+
+def passages(text: str, find: str, limit: int = 4000, most: int = 6) -> str:
+    """Only the paragraphs that mention the claim's key words (and the one before each, for context), in page
+    order. Checking a claim this way costs a fraction of reading the whole page."""
+    terms = {t for t in re.findall(r"\w+", find.lower()) if (len(t) > 2 or t.isdigit()) and t not in STOPWORDS}
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
+    if not terms or not paragraphs:
+        return text[:limit]
+    scored = []
+    for index, paragraph in enumerate(paragraphs):
+        words = set(re.findall(r"\w+", paragraph.lower()))
+        hits = len(terms & words) + sum(1 for t in terms if len(t) > 5 and t not in words and t in paragraph.lower())
+        if hits:
+            scored.append((hits, index))
+    if not scored:
+        return (f"(None of the words {', '.join(sorted(terms))} appear on this page. Its opening, to confirm it's the "
+                f"right page:)\n\n" + text[:1500])
+    best = sorted(scored, key=lambda s: (-s[0], s[1]))[:most]
+    keep = sorted({i for _, i in best} | {i - 1 for _, i in best if i > 0})
+    out, used, previous = [], 0, None
+    for i in keep:
+        if previous is not None and i != previous + 1:
+            out.append("[...]")
+        piece = paragraphs[i]
+        if used + len(piece) > limit:
+            out.append(piece[:max(0, limit - used)] + " [...]")
+            break
+        out.append(piece)
+        used += len(piece)
+        previous = i
+    return (f"(Only the passages mentioning: {', '.join(sorted(terms))}. Use --max without --find for the whole page.)"
+            f"\n\n" + "\n\n".join(out))
+
+
+def render(page: Page, limit: int, links: bool = False, find: str | None = None) -> str:
     head = [f"URL: {page.url}"]
     if page.via_archive:
         head.append(f"Read from the Internet Archive copy of {page.archived_at}; the live page refused or failed.")
@@ -218,7 +255,10 @@ def render(page: Page, limit: int, links: bool = False) -> str:
         head.append(page.note)
     if page.title:
         head.append(f"Title: {page.title}")
-    text = page.text if len(page.text) <= limit else page.text[:limit] + f"\n\n[... {len(page.text) - limit} more characters; use --max]"
+    if find and not page.text.startswith("("):
+        text = passages(page.text, find, min(limit, 4000))
+    else:
+        text = page.text if len(page.text) <= limit else page.text[:limit] + f"\n\n[... {len(page.text) - limit} more characters; use --max]"
     out = "\n".join(head) + "\n\n" + text
     if links and page.links:
         out += "\n\nLinks:\n" + "\n".join(f"- {t or '(no text)'}: {u}" for t, u in page.links)

@@ -615,12 +615,14 @@ def sources_check(args) -> int:
          arg("url"), arg("--max", type=int, default=20000, help="characters to show (default 20000)"),
          arg("--archive", action="store_true", help="read the newest archived copy directly"),
          arg("--links", action="store_true", help="also list every link on the page (a Wikipedia article's sources, say)"),
+         arg("--find", metavar="WORDS", help="show only the passages mentioning these words (a claim's names, dates, "
+                                             "numbers): far cheaper than the whole page when checking a claim"),
          arg("--run", default=os.environ.get("PSST_RUN"),
              help="the run reading it; reviews must read every source this way before approving"))
 def fetch_command(args) -> int:
     from . import fetch, rules
     page = fetch.read(args.url, args.archive)
-    print(fetch.render(page, args.max, args.links))
+    print(fetch.render(page, args.max, args.links, args.find))
     ok = bool(page.text) and not page.text.startswith(("(Couldn't", "(The archived copy", "(This PDF"))
     if args.run:
         # The address asked for and the one actually read (an archive copy, a listing's mirror) both count.

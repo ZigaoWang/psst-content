@@ -28,3 +28,13 @@ def test_compressed_captures_are_read():
     body = gzip.compress(b"<html><body><p>Captured compressed.</p></body></html>")
     page = fetch._page("https://example.org", 200, "text/html", fetch._decompress(body, ""))
     assert "Captured compressed." in page.text
+
+
+def test_find_shows_only_the_passages_about_the_claim():
+    from psst import fetch
+    text = "\n".join(["Intro about the city.", "Unrelated history of trams."] * 30
+                     + ["The lion was bought at Harrods in 1969 by Rendall.", "It later went to Kenya."]
+                     + ["More unrelated text."] * 30)
+    out = fetch.passages(text, "Harrods 1969 lion Kenya")
+    assert "bought at Harrods in 1969" in out and len(out) < 600
+    assert "None of the words" in fetch.passages(text, "zeppelin")
