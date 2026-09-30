@@ -58,11 +58,20 @@ EXCLUDED_AREAS = {
 # and rename, so they survive reloading the source.
 NAME_FIXES = {
     85861625: "Bishopsgate",  # Who's On First calls this patch of the City of London "Bishopstone".
+    890437279: "Hong Kong",   # Who's On First links Hong Kong to Victoria City's Wikidata item.
+}
+
+# Boundaries linked to the wrong Wikidata item in the source, which would name them after something else.
+WIKIDATA_FIXES = {
+    890437279: "Q8646",  # Hong Kong, not Victoria City (Q963152)
 }
 
 
 def apply_name_fixes(conn) -> int:
     fixed = 0
+    for area_id, qid in WIKIDATA_FIXES.items():
+        conn.execute("UPDATE admin_areas SET wikidata_id = %s WHERE id = %s AND wikidata_id IS DISTINCT FROM %s",
+                     (qid, area_id, qid))
     for area_id, name in NAME_FIXES.items():
         fixed += conn.execute("UPDATE admin_areas SET name = %s WHERE id = %s AND name <> %s",
                               (name, area_id, name)).rowcount
