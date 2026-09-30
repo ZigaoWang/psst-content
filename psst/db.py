@@ -1,6 +1,7 @@
 """Database access. The database only listens on the VPS itself, so the CLI reaches it through an SSH
-tunnel it opens and closes on its own. Set PSST_DATABASE_URL to connect directly instead (the server
-scripts on the VPS do this)."""
+tunnel it opens and closes on its own. Machines without SSH (Claude Code cloud sessions) set
+PSST_TUNNEL_URL and PSST_TUNNEL_TOKEN to go over HTTPS instead (psst/tunnel.py). Set PSST_DATABASE_URL to
+connect directly (the server scripts on the VPS do this)."""
 
 from __future__ import annotations
 
@@ -74,8 +75,25 @@ def conninfo() -> str:
     password = settings.get("PSST_DB_PASSWORD")
     if not password:
         raise RuntimeError(f"No PSST_DB_PASSWORD in {CONFIG} or the environment. See README.md, Setup.")
-    port = _open_tunnel(settings.get("PSST_SSH_HOST", "bwh"))
-    return f"host=127.0.0.1 port={port} dbname=psst user=psst password={password} application_name=psst-cli"
+    if settings.get("PSST_TUNNEL_URL"):
+        from . import tunnel
+        port = tunnel.open_local(settings["PSST_TUNNEL_URL"], settings.get("PSST_TUNNEL_TOKEN", ""))
+    else:
+        port = _open_tunnel(settings.get("PSST_SSH_HOST", "bwh"))
+    user = settings.get("PSST_DB_USER", "psst")
+    return f"host=127.0.0.1 port={port} dbname=psst user={user} password={password} application_name=psst-cli"
+
+
+def has_server_access() -> bool:
+    """Whether this machine can run things on the server (publishing, uploads), not just reach the database."""
+    return not _settings().get("PSST_TUNNEL_URL")
+
+
+def require_server_access(what: str) -> None:
+    if not has_server_access():
+        raise RuntimeError(f"{what} needs SSH access to the server, which this machine doesn't have (it reaches "
+                           "the database through the HTTPS tunnel). Run it from a machine with `ssh bwh`, "
+                           "or on the server.")
 
 
 @contextmanager
