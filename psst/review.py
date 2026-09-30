@@ -120,7 +120,7 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
             merged.update({k: v for k, v in changes.items() if k != "tags"})
             rules.check_fact(report, where, merged)
             unread = [s["url"] for s in merged["sources"] if isinstance(s, dict) and s.get("url")
-                      and rules.normalize_url(s["url"]) not in read]
+                      and rules.read_key(s["url"]) not in read]
             if unread:
                 report.error(where, "open every source before approving, with `psst fetch <url> --run <run id>`; "
                                     "not read in this run: " + ", ".join(unread))

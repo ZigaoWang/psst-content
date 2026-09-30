@@ -600,7 +600,7 @@ def fetch_command(args) -> int:
         with db.connect() as conn:
             conn.execute("""INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, %s)
                             ON CONFLICT (run_id, url_key) DO UPDATE SET ok = source_reads.ok OR EXCLUDED.ok,
-                                read_at = now()""", (args.run, rules.normalize_url(args.url), ok))
+                                read_at = now()""", (args.run, rules.read_key(args.url), ok))
     return 0 if ok else 1
 
 

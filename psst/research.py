@@ -487,7 +487,7 @@ def local_name_problem(conn, local: dict | None, pos: coords.Position) -> str | 
 def unread_sources(conn, draft: dict, run_id: str) -> list[str]:
     read = {r["url_key"] for r in conn.execute("SELECT url_key FROM source_reads WHERE run_id = %s", (run_id,))}
     urls = dict.fromkeys(s["url"] for p in draft["places"] for f in p["facts"] for s in f["sources"])
-    return [u for u in urls if rules.normalize_url(u) not in read]
+    return [u for u in urls if rules.read_key(u) not in read]
 
 
 def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:

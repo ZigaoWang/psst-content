@@ -60,3 +60,10 @@ def test_ids():
     assert rules.PLACE_ID_RE.match(ids.new("pl"))
     assert ids.derived("pl", "london-soho/x") == ids.derived("pl", "london-soho/x")
     assert ids.derived("pl", "london-soho/x") != ids.derived("pl", "london-soho/y")
+
+
+def test_an_archive_copy_reads_as_its_original():
+    original = "https://www.example.org/history/page"
+    assert rules.read_key("https://web.archive.org/web/20200101000000/http://www.example.org/history/page") == rules.read_key(original)
+    assert rules.read_key("https://web.archive.org/web/20200101000000id_/https://example.org/history/page") == rules.read_key(original)
+    assert rules.read_key("http://example.org/history/page") == rules.read_key(original)

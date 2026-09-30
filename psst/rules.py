@@ -198,6 +198,18 @@ def normalize_url(url: str) -> str:
     return f"{host}{path}" + (f"?{query}" if query else "")
 
 
+ARCHIVE_COPY = re.compile(r"^https?://web\.archive\.org/web/\d+(?:id_)?/(.+)$", re.I)
+
+
+def read_key(url: str) -> str:
+    """The key a read of a page is recorded under: an Internet Archive copy counts as a read of the original."""
+    match = ARCHIVE_COPY.match(url.strip())
+    original = match.group(1) if match else url
+    if not re.match(r"^https?://", original, re.I):
+        original = "https://" + original
+    return normalize_url(re.sub(r"^http://", "https://", original, flags=re.I))
+
+
 def check_source(report: Report, where: str, source: object) -> bool:
     if not isinstance(source, dict):
         report.error(where, "source must be an object")
