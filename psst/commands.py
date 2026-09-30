@@ -360,6 +360,28 @@ def status_command(args) -> int:
     return 0
 
 
+@command("places show", "Everything about one place: its names, pin, areas, and every story with its state.",
+         arg("place"))
+def places_show(args) -> int:
+    with db.connect() as conn:
+        place = conn.execute("""
+            SELECT p.id, p.kind, p.coord_source_ref, round(ST_Y(p.geom)::numeric, 6) AS lat,
+                   round(ST_X(p.geom)::numeric, 6) AS lon, p.h3_cell, ci.name AS city, nb.name AS neighborhood,
+                   (SELECT string_agg(role || ' ' || lang || ': ' || name, '; ' ORDER BY role, lang)
+                    FROM place_names WHERE place_id = p.id AND role <> 'alt') AS names
+            FROM places p LEFT JOIN admin_areas ci ON ci.id = p.city_id LEFT JOIN admin_areas nb ON nb.id = p.neighborhood_id
+            WHERE p.id = %s""", (args.place,)).fetchone()
+        if not place:
+            raise RuntimeError(f"No place {args.place}")
+        facts = conn.execute("""SELECT id, state, category, veracity, headline, short FROM facts WHERE place_id = %s
+                                ORDER BY position""", (args.place,)).fetchall()
+    print(f"{place['id']}  {place['names']}\n{place['kind']} at {place['lat']}, {place['lon']} ({place['coord_source_ref']}), "
+          f"{place['neighborhood'] or '-'}, {place['city'] or '-'}, cell {place['h3_cell']}\n")
+    for f in facts:
+        print(f"{f['id']}  [{f['state']}] {f['category']}, {f['veracity']}: {f['headline']}\n    {f['short']}")
+    return 0
+
+
 @command("places search", "Find places by name in any language, to check something isn't already in Psst.",
          arg("text"), arg("--json", action="store_true"))
 def places_search(args) -> int:
