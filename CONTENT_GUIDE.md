@@ -447,7 +447,7 @@ uv run psst review progress                                            # what's 
 uv run psst review next --verify --city "Kuala Lumpur" --out work/review.json
 ```
 
-`--verify` picks published facts nobody has checked since the migration. Add `--sample` for a random selection: reviewing 60 or so sampled facts per city estimates how accurate that city's content is, for far fewer tokens than checking every fact, and tells you whether a full pass is worth it. Review them exactly as above. Approving marks a fact verified; an edit changes it at the next publish; a rejection takes it down at the next publish. Publish after each batch of decisions.
+`--verify` picks published facts nobody has checked since the migration. To keep this affordable, check each claim with `uv run psst fetch <url> --run <run id> --find "<its names, dates, numbers>"`, which shows only the passages that mention them, and read a whole page only when those don't settle it (START.md, "Verify old content"). Add `--sample` for a random selection: reviewing 60 or so sampled facts per city estimates how accurate that city's content is, for far fewer tokens than checking every fact, and tells you whether a full pass is worth it. Review them exactly as above. Approving marks a fact verified; an edit changes it at the next publish; a rejection takes it down at the next publish. Publish after each batch of decisions.
 
 ## 13. Photos
 
