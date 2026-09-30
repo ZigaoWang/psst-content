@@ -142,11 +142,15 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
         existing = {r["h3_cell"]: r["n"] for r in conn.execute(
             "SELECT h3_cell, count(*) AS n FROM places WHERE state = 'active' GROUP BY h3_cell")}
         passes = {r["cell"]: r["passes"] for r in conn.execute("SELECT cell, passes FROM research_cells")}
-        # Distance from the city's middle: dense centers first, quiet edges last.
-        centers = {r["cell"]: (r["lat"], r["lon"]) for r in conn.execute("""
-            SELECT rc.cell, ST_Y(ST_PointOnSurface(ci.geom)) AS lat, ST_X(ST_PointOnSurface(ci.geom)) AS lon
+        # Distance from the city's middle: dense centers first, quiet edges last. The middle is the city's own
+        # coordinate on Wikidata (Charing Cross, People's Square); a point inside its boundary can be far out
+        # (Hong Kong's boundary is the whole territory, whose middle is country park).
+        rows = conn.execute("""
+            SELECT rc.cell, ci.wikidata_id, ST_Y(ST_PointOnSurface(ci.geom)) AS lat, ST_X(ST_PointOnSurface(ci.geom)) AS lon
             FROM research_cells rc JOIN admin_areas ci ON ci.id = rc.city_id
-            WHERE rc.cell = ANY(%s)""", ([r["cell"] for r in open_cells],))}
+            WHERE rc.cell = ANY(%s)""", ([r["cell"] for r in open_cells],)).fetchall()
+        middles = city_middles({r["wikidata_id"] for r in rows if r["wikidata_id"]})
+        centers = {r["cell"]: middles.get(r["wikidata_id"], (r["lat"], r["lon"])) for r in rows}
 
         # Where people looked first; then cells with the fewest passes, so every cell gets one before any
         # gets a second; then cells that already show rich content (dense areas only partly covered); then
@@ -163,6 +167,11 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
                 "SELECT cell, count(*) FILTER (WHERE fame >= %s) AS famous, count(*) AS n FROM research_leads "
                 "WHERE status = 'open' GROUP BY cell", (WELL_KNOWN,))}
             candidates = [r["cell"] for r in open_cells if passes.get(r["cell"], 0) > 0 and left.get(r["cell"])]
+            # A cell that just had a pass waits, while other cells have work left, so several passes in a row
+            # (or several sessions) spread over the densest cells instead of piling onto one.
+            recent = {r["cell"] for r in conn.execute(
+                "SELECT cell FROM research_cells WHERE last_researched_at > now() - interval '12 hours'")}
+            candidates = [c for c in candidates if c not in recent] or candidates
             if not candidates:
                 raise RuntimeError("No partly researched cells with leads left" + (" in that city" if city_id else "")
                                    + "; claim without --deeper.")
@@ -179,6 +188,21 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
                  (run_id, CLAIM_HOURS, cell))
     conn.execute("UPDATE pipeline_runs SET cell = %s WHERE id = %s", (cell, run_id))
     return conn.execute(CELL_STATS + " WHERE rc.cell = %s", (cell,)).fetchone()
+
+
+def city_middles(qids: set[str]) -> dict[str, tuple[float, float]]:
+    """Each city's own coordinate (Wikidata P625), by Wikidata id. Empty when Wikidata can't be reached."""
+    middles: dict[str, tuple[float, float]] = {}
+    try:
+        entities = net.wikidata_entities(sorted(qids), props="claims")
+    except RuntimeError:
+        return middles
+    for qid, entity in entities.items():
+        for claim in entity.get("claims", {}).get("P625", [])[:1]:
+            value = claim.get("mainsnak", {}).get("datavalue", {}).get("value", {})
+            if "latitude" in value:
+                middles[qid] = (value["latitude"], value["longitude"])
+    return middles
 
 
 def release(conn, cell: str) -> None:
