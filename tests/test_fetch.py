@@ -53,3 +53,9 @@ def test_the_server_fetcher_only_reads_public_addresses():
     for private in ("http://127.0.0.1:5432/", "http://localhost/", "http://10.0.0.1/", "file:///etc/passwd",
                     "http://[::1]/"):
         assert not tunnel._public(private), private
+
+
+def test_find_matches_chinese_words_inside_sentences():
+    from psst import fetch
+    out = fetch.passages("无关内容。\n武康大楼原名诺曼底公寓，1924年建成。\n其他。", "诺曼底 1924")
+    assert "诺曼底公寓" in out and "无关内容" in out  # the matching line, and the one before it for context

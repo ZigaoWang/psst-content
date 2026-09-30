@@ -244,7 +244,9 @@ def passages(text: str, find: str, limit: int = 4000, most: int = 6) -> str:
     scored = []
     for index, paragraph in enumerate(paragraphs):
         words = set(re.findall(r"\w+", paragraph.lower()))
-        hits = len(terms & words) + sum(1 for t in terms if len(t) > 5 and t not in words and t in paragraph.lower())
+        # Long words also count inside longer ones; Chinese and Japanese have no spaces, so always match inside.
+        hits = len(terms & words) + sum(1 for t in terms if (len(t) > 5 or not t.isascii()) and t not in words
+                                        and t in paragraph.lower())
         if hits:
             scored.append((hits, index))
     if not scored:
