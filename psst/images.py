@@ -131,7 +131,8 @@ def commons_files(titles: list[str], found_via: str) -> list[Candidate]:
                 continue
             if AI_MADE.search(_text(meta.get("Categories"))):
                 continue
-            author = _text(meta.get("Artist")) or _text(meta.get("Credit"))
+            # A Commons user name reads better without its namespace, as Commons' own credit shows it.
+            author = re.sub(r"^User:", "", _text(meta.get("Artist")) or _text(meta.get("Credit")))
             if not author or info.get("width", 0) < 800:
                 continue
             title = page["title"]
