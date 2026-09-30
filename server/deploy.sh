@@ -7,4 +7,6 @@ target=/www/wwwroot/psst/app
 rsync -az --delete \
   --exclude .git --exclude .venv --exclude work --exclude export --exclude candidates --exclude plans \
   --exclude tmp --exclude areas --exclude '__pycache__' ./ "$host:$target/"
-ssh "$host" "cd $target && ~/.local/bin/uv sync -q --no-dev && echo 'Deployed to $target'"
+ssh "$host" "cd $target && ~/.local/bin/uv sync -q --no-dev && \
+  install -m 644 server/public/privacy/index.html /www/wwwroot/psst/public/privacy/index.html && \
+  echo 'Deployed to $target'"
