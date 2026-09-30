@@ -51,6 +51,7 @@ OSM_NODE_OFFSET = 10**13
 # Known errors in the boundary data, never used for assignment. Each needs a reason.
 EXCLUDED_AREAS = {
     1158894067: "Who's On First files the River Thames as a London neighbourhood.",
+    85792207: "Who's On First labels a patch of Kensal Town in West London as West Tilbury, a village in Essex.",
 }
 
 # Suffixes that only say what kind of division an area is, dropped from English names.
