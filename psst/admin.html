@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Psst admin</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #fff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dd; --accent: #0067b1;
+    --green: #00783a; --amber: #b87700; --red: #b3261e; --purple: #7a1f5c; --chip: #efeee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1f1f1d; --text: #ecebe6; --muted: #9b9a93; --line: #34332f; --chip: #2b2a27;
+            --accent: #5aa9e6; --green: #4cc27b; --amber: #e2a73b; --red: #ef6b62; --purple: #d17bb1; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg);
+         color: var(--text); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 14px 24px; background: var(--panel);
+           border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+  nav a { padding: 5px 10px; border-radius: 7px; color: var(--text); font-weight: 500; }
+  nav a.on { background: var(--text); color: var(--panel); text-decoration: none; }
+  main { padding: 20px 24px 60px; max-width: 1400px; margin: 0 auto; }
+  h2 { font-size: 15px; margin: 28px 0 10px; }
+  h2:first-child { margin-top: 0; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card .n { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+  .card .l { color: var(--muted); font-size: 12px; }
+  .card.link { cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line);
+          border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--panel); cursor: default; white-space: nowrap; }
+  th.sort { cursor: pointer; }
+  tr:last-child td { border-bottom: 0; }
+  tr.click { cursor: pointer; }
+  tr.click:hover td { background: var(--chip); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; display: flex; min-width: 120px; }
+  .bar span { display: block; height: 100%; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600;
+           background: var(--chip); color: var(--muted); white-space: nowrap; }
+  .badge.published, .badge.done, .badge.passed, .badge.approved { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+  .badge.draft, .badge.open, .badge.partial { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+  .badge.reviewed { background: color-mix(in srgb, var(--purple) 15%, transparent); color: var(--purple); }
+  .badge.retired, .badge.flagged, .badge.failed { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  input, select { font: inherit; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+                  color: var(--text); }
+  input[type=search] { min-width: 260px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+           color: var(--text); cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .photo { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .photo img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: var(--chip); cursor: zoom-in; }
+  .photo .c { padding: 8px 10px; font-size: 12px; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); background: var(--panel);
+            border-left: 1px solid var(--line); overflow-y: auto; z-index: 10; box-shadow: -8px 0 30px rgba(0,0,0,.12);
+            padding: 20px 24px 60px; display: none; }
+  #drawer.on { display: block; }
+  #drawer .close { position: sticky; top: 0; float: right; }
+  .fact { border-top: 1px solid var(--line); padding: 14px 0; }
+  .fact h3 { font: 600 17px/1.3 Georgia, serif; margin: 6px 0; }
+  .fact .short { font-family: Georgia, serif; font-size: 15px; }
+  .fact details { margin-top: 6px; }
+  .fact summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 3px 12px; font-size: 13px; margin: 10px 0; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .thumbs { display: flex; gap: 10px; overflow-x: auto; margin: 12px 0; }
+  .thumbs figure { margin: 0; width: 220px; flex: none; }
+  .thumbs img { width: 220px; height: 150px; object-fit: cover; border-radius: 10px; display: block; cursor: zoom-in; }
+  .thumbs figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; z-index: 20; align-items: center;
+              justify-content: center; flex-direction: column; padding: 20px; cursor: zoom-out; }
+  #lightbox.on { display: flex; }
+  #lightbox img { max-width: 100%; max-height: 85vh; }
+  #lightbox p { color: #ddd; font-size: 13px; max-width: 900px; text-align: center; }
+  iframe { width: 100%; height: calc(100vh - 110px); border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .empty { padding: 30px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Psst admin</h1>
+  <span class="meta" id="meta">Loading…</span>
+  <nav id="nav"></nav>
+</header>
+<main id="main"></main>
+<aside id="drawer"></aside>
+<div id="lightbox"><img alt=""><p></p></div>
+<script>
+const TABS = [["overview", "Overview"], ["places", "Places"], ["review", "Review queue"], ["photos", "Photos"],
+              ["reports", "Reports"], ["runs", "Runs"], ["demand", "Demand"], ["map", "Map"]];
+const STATE_COLORS = {done: "var(--green)", partial: "#7fb77e", in_progress: "var(--accent)", untouched: "var(--chip)"};
+let D, byPlace = {}, factsByPlace = {}, imagesByPlace = {};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+// Small shares keep a decimal, so 5 of 1,930 reads 0.3%, not 0%.
+const pct = (a, b) => { if (!b || !a) return "0%"; const v = 100 * a / b; return (v < 10 ? v.toFixed(1) : Math.round(v)) + "%"; };
+const fmt = n => Number(n || 0).toLocaleString("en-US");
+const badge = (s, extra = "") => `<span class="badge ${esc(s)}">${esc(extra || s)}</span>`;
+const img = file => `/images/${file}`;
+
+async function load() {
+  // Built from the origin, so a login typed into the address bar doesn't end up in the request.
+  const res = await fetch(new URL("data.json.gz", location.origin + location.pathname), {cache: "no-cache"});
+  if (!res.ok) throw new Error(`the data file answered ${res.status}`);
+  const text = await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).text();
+  D = JSON.parse(text);
+  for (const p of D.places) byPlace[p.id] = p;
+  for (const f of D.facts) (factsByPlace[f.place_id] ||= []).push(f);
+  for (const i of D.images) (imagesByPlace[i.place_id] ||= []).push(i);
+  const live = D.publications[0];
+  document.getElementById("meta").textContent =
+    `Data from ${D.generatedAt}` + (live ? ` · live version ${live.version}, published ${live.at} UTC` : "");
+  route();
+}
+
+function route() {
+  const [tab, arg] = (location.hash.slice(1) || "overview").split("/");
+  document.getElementById("nav").innerHTML = TABS.map(([id, label]) =>
+    `<a href="#${id}" class="${id === tab || (tab === "place" && id === "places") ? "on" : ""}">${label}</a>`).join("");
+  const main = document.getElementById("main");
+  if (tab === "place") {
+    if (!main.dataset.tab) { main.dataset.tab = "places"; main.innerHTML = renderPlaces(); bindPlaces(); }
+    openPlace(arg);
+    return;
+  }
+  closeDrawer(false);
+  main.dataset.tab = tab;
+  main.innerHTML = ({overview: renderOverview, places: renderPlaces, review: renderReview, photos: renderPhotos,
+                     reports: renderReports, runs: renderRuns, demand: renderDemand, map: renderMap}[tab] || renderOverview)();
+  if (tab === "places") bindPlaces();
+  if (tab === "photos") bindPhotos();
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
+
+// Overview ------------------------------------------------------------------------------------------------
+
+function renderOverview() {
+  const t = D.totals;
+  const waiting = t.facts.draft + t.facts.reviewed + t.flagged + t.photos.draft + t.photos.reviewed;
+  const card = (n, l, href) => `<div class="card ${href ? "link" : ""}" ${href ? `onclick="location.hash='${href}'"` : ""}>
+      <div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const b = D.backup || {};
+  return `
+  <div class="cards">
+    ${card(fmt(t.live_places), "places live in the app", "places")}
+    ${card(fmt(t.facts.published), "published stories", "places")}
+    ${card(fmt(waiting), `waiting for review (${t.facts.draft} draft, ${t.facts.reviewed} approved, ${t.flagged} flagged, ${t.photos.draft + t.photos.reviewed} photos)`, "review")}
+    ${card(`${pct(t.places_with_photos, t.live_places)}`, `of live places have a photo (${fmt(t.places_with_photos)} of ${fmt(t.live_places)})`, "photos")}
+    ${card(fmt(t.open_reports), "open problem reports", "reports")}
+    ${card(`${pct(t.migrated_verified, t.migrated_published)}`, `of migrated stories verified (${fmt(t.migrated_verified)} of ${fmt(t.migrated_published)})`)}
+  </div>
+
+  <h2>Cities</h2>
+  <table>
+    <tr><th>City</th><th>Research cells</th><th class="num">Done</th><th class="num">Partly</th><th class="num">Not yet</th>
+        <th class="num">Leads left</th><th class="num">Live places</th><th class="num">Stories</th><th class="num">Waiting</th>
+        <th class="num">With photo</th><th class="num">Verified</th></tr>
+    ${D.cities.map(c => {
+      const seg = (n, color) => n ? `<span style="width:${100 * n / c.cells}%;background:${color}"></span>` : "";
+      return `<tr class="click" onclick="location.hash='places';setTimeout(()=>{document.getElementById('f-city').value=${esc(JSON.stringify(c.city))};filterPlaces()})">
+        <td><b>${esc(c.city)}</b></td>
+        <td>${c.cells ? `<div class="bar" title="${c.done} done, ${c.partial} partly, ${c.in_progress} in progress, ${c.untouched} not yet">
+              ${seg(c.done, STATE_COLORS.done)}${seg(c.partial, STATE_COLORS.partial)}${seg(c.in_progress, STATE_COLORS.in_progress)}</div>
+              <span class="small muted">${pct(c.done + c.partial, c.cells)} touched of ${fmt(c.cells)}</span>` : `<span class="muted small">outside research cities</span>`}</td>
+        <td class="num">${fmt(c.done)}</td><td class="num">${fmt(c.partial)}</td><td class="num">${fmt(c.untouched)}</td>
+        <td class="num">${fmt(c.open_leads)}</td><td class="num">${fmt(c.live_places)}</td><td class="num">${fmt(c.published)}</td>
+        <td class="num">${fmt(c.drafts)}</td><td class="num">${pct(c.with_photos, c.live_places)}</td>
+        <td class="num">${pct(c.verified, c.published)}</td></tr>`;
+    }).join("")}
+  </table>
+
+  <div class="two">
+    <div>
+      <h2>Publishing</h2>
+      <table><tr><th>Version</th><th>Published (UTC)</th><th class="num">Places</th><th class="num">Stories</th></tr>
+      ${D.publications.slice(0, 8).map(p => `<tr><td>${esc(p.version)}</td><td>${esc(p.at)}</td>
+        <td class="num">${fmt(p.places)}</td><td class="num">${fmt(p.facts)}</td></tr>`).join("")}</table>
+    </div>
+    <div>
+      <h2>Backups</h2>
+      ${b.last_backup ? `<table>
+        <tr><td>Last backup</td><td>${esc(b.last_backup)} ${badge(b.warnings === "none" ? "passed" : "failed", b.warnings === "none" ? "OK" : "warning")}</td></tr>
+        <tr><td>Restore test</td><td>${esc(b.restore_test)}</td></tr>
+        <tr><td>Warnings</td><td>${esc(b.warnings)}</td></tr>
+        <tr><td>Backup size</td><td>${fmt(Math.round(b.export_bytes / 1e6))} MB of CSV, ${fmt(Math.round(b.dump_bytes / 1e6))} MB dump</td></tr>
+        <tr><td>Disk free</td><td>${fmt(Math.round(b.disk_free_bytes / 1e9))} GB</td></tr></table>`
+        : `<div class="empty">Backup status is only available when this page is built on the server.</div>`}
+      <h2>Recent work</h2>
+      <table><tr><th>When</th><th>Kind</th><th>Did</th></tr>
+      ${D.runs.slice(0, 8).map(r => `<tr><td class="small">${esc(r.started)}</td><td>${esc(r.kind)}</td><td class="small">${runSummary(r)}</td></tr>`).join("")}</table>
+    </div>
+  </div>
+  <h2>Most connected tags</h2>
+  <p class="small">${D.tags.slice(0, 60).map(t => `<span class="badge" title="${esc(t.type)}">${esc(t.name)} · ${t.places}</span>`).join(" ")}</p>`;
+}
+
+function runSummary(r) {
+  const parts = [];
+  if (r.places_added) parts.push(`${r.places_added} places`);
+  if (r.facts_written) parts.push(`${r.facts_written} stories written`);
+  if (r.facts_reviewed) parts.push(`${r.facts_reviewed} stories reviewed`);
+  if (r.photos_added) parts.push(`${r.photos_added} photos added`);
+  if (r.photos_reviewed) parts.push(`${r.photos_reviewed} photos reviewed`);
+  return esc(parts.join(", ") || r.notes || "");
+}
+
+// Places --------------------------------------------------------------------------------------------------
+
+let placeSort = ["published", -1], placeLimit = 200;
+
+function renderPlaces() {
+  const cities = [...new Set(D.places.map(p => p.city || "Other"))].sort();
+  const kinds = [...new Set(D.places.map(p => p.kind))].sort();
+  return `<div class="filters">
+    <input type="search" id="f-q" placeholder="Search name, neighborhood, or id">
+    <select id="f-city"><option value="">All cities</option>${cities.map(c => `<option>${esc(c)}</option>`).join("")}</select>
+    <select id="f-kind"><option value="">All kinds</option>${kinds.map(k => `<option>${esc(k)}</option>`).join("")}</select>
+    <select id="f-photo"><option value="">Photos: any</option><option value="with">With a photo</option>
+      <option value="without">Without a photo</option><option value="waiting">Photo waiting for review</option></select>
+    <select id="f-state"><option value="live">Live in the app</option><option value="">All places</option>
+      <option value="waiting">With stories waiting for review</option><option value="flagged">Flagged or reported</option>
+      <option value="hidden">Not live (no published story)</option></select>
+    <span class="muted small" id="f-count"></span>
+  </div><div id="place-table"></div>`;
+}
+
+function bindPlaces() {
+  for (const id of ["f-q", "f-city", "f-kind", "f-photo", "f-state"])
+    document.getElementById(id).addEventListener("input", () => { placeLimit = 200; filterPlaces(); });
+  filterPlaces();
+}
+
+function filterPlaces() {
+  const q = document.getElementById("f-q").value.trim().toLowerCase();
+  const city = document.getElementById("f-city").value, kind = document.getElementById("f-kind").value;
+  const photo = document.getElementById("f-photo").value, state = document.getElementById("f-state").value;
+  let rows = D.places.filter(p =>
+    (!q || [p.name, p.local_name, p.id, p.neighborhood, p.district, p.wikidata].some(v => v && String(v).toLowerCase().includes(q))) &&
+    (!city || (p.city || "Other") === city) && (!kind || p.kind === kind) &&
+    (!photo || (photo === "with" ? p.photos : photo === "without" ? !p.photos : p.photo_drafts)) &&
+    (!state || (state === "live" ? p.published : state === "waiting" ? p.drafts + p.reviewed : state === "flagged" ? p.flagged : !p.published)));
+  const [key, dir] = placeSort;
+  rows.sort((a, b) => (a[key] ?? "") > (b[key] ?? "") ? dir : (a[key] ?? "") < (b[key] ?? "") ? -dir : 0);
+  document.getElementById("f-count").textContent = `${fmt(rows.length)} places`;
+  const th = (k, label, cls = "") => `<th class="sort ${cls}" onclick="placeSort=['${k}',placeSort[0]==='${k}'?-placeSort[1]:(${cls ? -1 : 1})];filterPlaces()">${label}${placeSort[0] === k ? (placeSort[1] > 0 ? " ↑" : " ↓") : ""}</th>`;
+  document.getElementById("place-table").innerHTML = rows.length ? `<table>
+    <tr>${th("name", "Place")}${th("neighborhood", "Where")}${th("kind", "Kind")}${th("published", "Stories", "num")}
+        ${th("drafts", "Waiting", "num")}${th("photos", "Photos", "num")}${th("created", "Added")}</tr>
+    ${rows.slice(0, placeLimit).map(p => `<tr class="click" onclick="location.hash='place/${p.id}'">
+      <td><b>${esc(p.name)}</b>${p.local_name ? ` <span class="muted">${esc(p.local_name)}</span>` : ""}
+          ${p.flagged ? badge("flagged") : ""}<div class="small muted">${p.id}</div></td>
+      <td>${esc([p.neighborhood, p.district, p.city].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", "))}</td>
+      <td>${esc(p.kind)}</td><td class="num">${p.published}</td>
+      <td class="num">${p.drafts + p.reviewed || ""}</td>
+      <td class="num">${p.photos || ""}${p.photo_drafts ? ` <span class="muted">+${p.photo_drafts}</span>` : ""}</td>
+      <td class="small">${esc(p.created)}</td></tr>`).join("")}
+    </table>${rows.length > placeLimit ? `<p><button onclick="placeLimit+=500;filterPlaces()">Show more (${fmt(rows.length - placeLimit)} left)</button></p>` : ""}`
+    : `<div class="empty">No places match.</div>`;
+}
+
+// One place -------------------------------------------------------------------------------------------------
+
+function openPlace(id) {
+  const p = byPlace[id], drawer = document.getElementById("drawer");
+  if (!p) { drawer.innerHTML = `<p>No place ${esc(id)}.</p>`; drawer.classList.add("on"); return; }
+  const facts = factsByPlace[id] || [], photos = imagesByPlace[id] || [];
+  const links = [
+    p.wikidata && `<a href="https://www.wikidata.org/wiki/${p.wikidata}" target="_blank">Wikidata ${p.wikidata}</a>`,
+    p.osm && `<a href="https://www.openstreetmap.org/${p.osm}" target="_blank">OpenStreetMap ${esc(p.osm)}</a>`,
+    `<a href="https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}#map=18/${p.lat}/${p.lon}" target="_blank">Pin on a map</a>`,
+    `<a href="https://maps.apple.com/?ll=${p.lat},${p.lon}&q=${encodeURIComponent(p.name)}" target="_blank">Apple Maps</a>`,
+  ].filter(Boolean).join(" · ");
+  drawer.innerHTML = `<button class="close" onclick="closeDrawer(true)">Close</button>
+    <div class="muted small">${esc(p.kind)} · ${esc(p.size || "")}</div>
+    <h2 style="font-size:24px;margin:4px 0">${esc(p.name)}</h2>
+    ${p.local_name ? `<div class="muted" style="font-size:16px">${esc(p.local_name)}</div>` : ""}
+    <div class="kv">
+      <div>Where</div><div>${esc([p.neighborhood, p.district, p.city, p.country].filter(Boolean).join(", "))}</div>
+      <div>Pin</div><div>${p.lat}, ${p.lon} (from ${esc(p.coord_source)})</div>
+      <div>Links</div><div>${links}</div>
+      <div>Research cell</div><div>${esc(p.cell)} · <a href="map.html" target="_blank">coverage map</a></div>
+      <div>Id</div><div>${p.id} · added ${esc(p.created)}</div>
+    </div>
+    <h2>Photos</h2>
+    ${photos.length ? `<div class="thumbs">${photos.map(photoFigure).join("")}</div>`
+      : `<div class="empty">No photo yet. The app shows the map and Look Around.<br><code>uv run psst images find --place ${p.id}</code></div>`}
+    <h2>Stories (${facts.length})</h2>
+    ${facts.map(factBlock).join("") || `<div class="empty">No stories.</div>`}`;
+  drawer.classList.add("on");
+  drawer.scrollTop = 0;
+}
+
+function photoFigure(i) {
+  return `<figure><img loading="lazy" src="${img(i.thumb)}" alt="${esc(i.alt)}"
+      onclick="showPhoto(${esc(JSON.stringify(i.full))}, ${esc(JSON.stringify(i.alt + " Photo: " + i.author + ", " + i.license))})">
+    <figcaption>${badge(i.state)} ${i.kind === "historic" ? badge("", String(i.year)) : ""}
+      <a href="${esc(i.source_url)}" target="_blank">${esc(i.author)}, ${esc(i.license)}</a><br>${esc(i.alt)}
+      ${i.review_notes ? `<br><i>Review: ${esc(i.review_notes)}</i>` : ""}${i.retire_reason ? `<br><i>${esc(i.retire_reason)}</i>` : ""}
+      <br><span class="muted">${i.id} · focus ${i.focus_x.toFixed(2)}, ${i.focus_y.toFixed(2)}</span></figcaption></figure>`;
+}
+
+function factBlock(f) {
+  return `<div class="fact">
+    ${badge(f.state)} ${f.needs_review && f.state !== "retired" ? badge("flagged") : ""}
+    ${f.veracity !== "fact" ? badge("", f.veracity) : ""} <span class="muted small">${esc(f.category)}</span>
+    ${f.migrated ? `<span class="muted small"> · migrated${f.verified ? ", verified" : ", not yet verified"}</span>` : ""}
+    <h3>${esc(f.headline)}</h3>
+    <div class="short">${esc(f.short)}</div>
+    <details><summary>Full story</summary><p>${esc(f.long)}</p></details>
+    <details open><summary>Sources (${f.sources.length})</summary><ol class="small">${f.sources.map(s =>
+      `<li><a href="${esc(s.url)}" target="_blank">${esc(s.title)}</a> <span class="muted">${esc(s.publisher)}</span>
+       ${s.failed >= 2 ? badge("failed", "link failing") : ""}</li>`).join("")}</ol></details>
+    ${f.tags.length ? `<div class="small">${f.tags.map(t => `<span class="badge">${esc(t)}</span>`).join(" ")}</div>` : ""}
+    <div class="kv small">
+      <div>Written</div><div>${esc(f.researched || "")} by ${esc(f.researched_by || "?")}</div>
+      <div>Reviewed</div><div>${f.reviewed ? `${esc(f.reviewed)} by ${esc(f.reviewed_by)}` : "not yet"}</div>
+      ${f.review_notes ? `<div>Review notes</div><div>${esc(f.review_notes)}</div>` : ""}
+      ${f.retire_reason ? `<div>Retired because</div><div>${esc(f.retire_reason)}</div>` : ""}
+      <div>Id</div><div>${f.id}</div>
+    </div>
+    ${f.history.length ? `<details><summary>History (${f.history.length})</summary><table class="small">${f.history.map(e =>
+      `<tr><td>${esc(e.at)}</td><td>${badge(e.to)}</td><td>${esc((e.changes || []).join(", "))}</td>
+       <td>${esc(e.actor)}</td><td>${esc(e.note || "")}</td></tr>`).join("")}</table></details>` : ""}
+  </div>`;
+}
+
+function closeDrawer(back) {
+  document.getElementById("drawer").classList.remove("on");
+  if (back && location.hash.startsWith("#place/")) location.hash = document.getElementById("main").dataset.tab || "places";
+}
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (document.getElementById("lightbox").classList.contains("on")) document.getElementById("lightbox").classList.remove("on");
+  else closeDrawer(true);
+});
+
+function showPhoto(file, caption) {
+  const box = document.getElementById("lightbox");
+  box.querySelector("img").src = img(file);
+  box.querySelector("p").textContent = caption;
+  box.classList.add("on");
+}
+document.getElementById("lightbox").addEventListener("click", e => e.currentTarget.classList.remove("on"));
+
+// Review queue ----------------------------------------------------------------------------------------------
+
+function renderReview() {
+  const waiting = D.facts.filter(f => f.state === "draft" || f.state === "reviewed" || (f.needs_review && f.state !== "retired"));
+  const photos = D.images.filter(i => i.state === "draft" || i.state === "reviewed" || (i.needs_review && i.state !== "retired"));
+  const label = f => f.needs_review && f.state === "published" ? badge("flagged") : badge(f.state, f.state === "reviewed" ? "approved, not published" : f.state);
+  return `<p class="muted">Stories and photos waiting for a review run, or approved and waiting for <code>psst publish</code>.
+    Reviewing happens in a Claude Code session: <code>review</code>.</p>
+    <h2>Stories (${waiting.length})</h2>
+    ${waiting.length ? `<table><tr><th>Story</th><th>Place</th><th>State</th><th>Written</th></tr>
+      ${waiting.map(f => `<tr class="click" onclick="location.hash='place/${f.place_id}'"><td><b>${esc(f.headline)}</b>
+        <div class="small muted">${esc(f.short)}</div></td><td>${esc(byPlace[f.place_id]?.name)}</td>
+        <td>${label(f)}</td><td class="small">${esc(f.researched || "")}<br>${esc(f.researched_by || "")}</td></tr>`).join("")}</table>`
+      : `<div class="empty">Nothing waiting.</div>`}
+    <h2>Photos (${photos.length})</h2>
+    ${photos.length ? `<div class="grid">${photos.map(photoCard).join("")}</div>` : `<div class="empty">No photos waiting.</div>`}`;
+}
+
+// Photos ------------------------------------------------------------------------------------------------------
+
+function photoCard(i) {
+  const p = byPlace[i.place_id];
+  return `<div class="photo"><img loading="lazy" src="${img(i.thumb)}" alt="${esc(i.alt)}"
+      onclick="showPhoto(${esc(JSON.stringify(i.full))}, ${esc(JSON.stringify(i.alt + " Photo: " + i.author + ", " + i.license))})">
+    <div class="c"><a href="#place/${i.place_id}"><b>${esc(p?.name || i.place_id)}</b></a> ${badge(i.state)}
+      ${i.kind === "historic" ? badge("", String(i.year)) : ""}<br>
+      <a href="${esc(i.source_url)}" target="_blank" class="muted">${esc(i.author)}, ${esc(i.license)}</a></div></div>`;
+}
+
+function renderPhotos() {
+  const t = D.totals;
+  const without = D.places.filter(p => p.published && !p.photos && !p.photo_drafts).sort((a, b) => b.published - a.published);
+  return `<div class="cards">
+      <div class="card"><div class="n">${pct(t.places_with_photos, t.live_places)}</div><div class="l">of live places have a photo</div></div>
+      <div class="card"><div class="n">${fmt(t.photos.published)}</div><div class="l">published photos</div></div>
+      <div class="card"><div class="n">${fmt(t.photos.draft + t.photos.reviewed)}</div><div class="l">waiting for review or publish</div></div>
+      <div class="card"><div class="n">${fmt(t.photos.retired)}</div><div class="l">rejected or taken down</div></div>
+    </div>
+    <div class="filters" style="margin-top:16px"><select id="ph-state"><option value="">All photos</option>
+      <option>published</option><option>draft</option><option>reviewed</option><option>retired</option></select></div>
+    <div id="ph-grid"></div>
+    <h2>Live places without a photo (${fmt(without.length)}), most stories first</h2>
+    <table><tr><th>Place</th><th>Where</th><th class="num">Stories</th></tr>
+      ${without.slice(0, 60).map(p => `<tr class="click" onclick="location.hash='place/${p.id}'"><td>${esc(p.name)}</td>
+        <td>${esc([p.neighborhood, p.city].filter(Boolean).join(", "))}</td><td class="num">${p.published}</td></tr>`).join("")}</table>`;
+}
+
+function bindPhotos() {
+  const draw = () => {
+    const s = document.getElementById("ph-state").value;
+    const list = D.images.filter(i => !s || i.state === s);
+    document.getElementById("ph-grid").innerHTML = list.length ? `<div class="grid">${list.map(photoCard).join("")}</div>`
+      : `<div class="empty">No photos.</div>`;
+  };
+  document.getElementById("ph-state").addEventListener("input", draw);
+  draw();
+}
+
+// Reports, runs, demand, map ----------------------------------------------------------------------------------
+
+function renderReports() {
+  return D.reports.length ? `<table><tr><th>When (UTC)</th><th>State</th><th>Reason</th><th>Message</th><th>Story</th><th>App</th></tr>
+    ${D.reports.map(r => `<tr class="click" onclick="location.hash='place/${r.place_id}'"><td class="small">${esc(r.at)}</td>
+      <td>${badge(r.state)}</td><td>${esc(r.reason)}</td><td>${esc(r.message || "")}</td>
+      <td><b>${esc(r.headline)}</b><div class="small muted">${esc(byPlace[r.place_id]?.name)}</div></td>
+      <td class="small">${esc(r.app_version || "")}</td></tr>`).join("")}</table>`
+    : `<div class="empty">No problem reports yet. When a reader reports a story in the app, it appears here and the story is flagged for review.</div>`;
+}
+
+function renderRuns() {
+  return `<table><tr><th>Started (UTC)</th><th>Finished</th><th>Kind</th><th>Model</th><th>Did</th><th>Notes</th></tr>
+    ${D.runs.map(r => `<tr><td class="small">${esc(r.started)}</td>
+      <td class="small">${r.finished ? esc(r.finished) : badge("open", "running")}</td><td>${esc(r.kind)}</td>
+      <td class="small">${esc(r.model || r.operator)}</td><td class="small">${runSummary(r)}</td>
+      <td class="small muted">${esc(r.notes || "")}${r.cell ? ` · ${esc(r.cell)}` : ""}</td></tr>`).join("")}</table>`;
+}
+
+function renderDemand() {
+  return `<p class="muted">Areas people looked at in the app while Psst had nothing there, over the last 90 days. Each is a
+    hexagon of about 250 km². Research goes to the most-viewed first. <a href="map.html" target="_blank">See them on the map</a>.</p>
+    ${D.demand.length ? `<table><tr><th>Area (H3 cell)</th><th class="num">Views</th><th>Last seen</th></tr>
+      ${D.demand.map(d => `<tr><td>${esc(d.cell)}</td><td class="num">${fmt(d.views)}</td><td>${esc(d.last_day)}</td></tr>`).join("")}</table>`
+      : `<div class="empty">No requests yet. They arrive once people use the app outside the cities Psst covers.</div>`}`;
+}
+
+function renderMap() {
+  return `<iframe src="map.html" title="Coverage map"></iframe>`;
+}
+
+load().catch(e => { document.getElementById("main").innerHTML = `<div class="empty">Couldn't load the data: ${esc(e)}</div>`; });
+</script>
+</body>
+</html>
