@@ -507,6 +507,8 @@ def research_wanted(args) -> int:
          arg("--cell", help="a specific cell (default: the most wanted open cell)"),
          arg("--city", help="pick from this city (English name)"), arg("--country"),
          arg("--near", metavar="LAT,LON", help="the open cell closest to this point, for a particular area"),
+         arg("--deeper", action="store_true",
+             help="another pass on the partly researched cell with the most leads left, instead of a new cell"),
          arg("--no-sweep", action="store_true", help="skip the Wikipedia and OpenStreetMap leads"), RUN_ARG)
 def research_claim(args) -> int:
     from . import research, runs
@@ -514,7 +516,7 @@ def research_claim(args) -> int:
         runs.require(conn, args.run, "research")
         city_id = research.find_city(conn, args.city, args.country)["id"] if args.city else None
         near = tuple(float(x) for x in args.near.split(",")) if args.near else None
-        cell = research.claim(conn, args.run, args.cell, city_id, near)
+        cell = research.claim(conn, args.run, args.cell, city_id, near, args.deeper)
     print(f"Claimed {cell['cell']} ({cell['city']}) until {cell['claimed_until']:%Y-%m-%d %H:%M %Z}. "
           f"It has {cell['places']} places and {cell['published']} published facts.")
     with db.connect() as conn:

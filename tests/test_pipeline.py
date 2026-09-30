@@ -321,3 +321,16 @@ def test_research_must_open_its_sources(scratch, cell, tag_id):
     scratch.execute("INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, true)",
                     (researcher["id"], rules.read_key("https://example.org/test-bench")))
     assert research.submit(scratch, draft, researcher, checked)["facts"] == 1
+
+
+def test_deeper_picks_the_partly_done_cell_with_most_left(scratch):
+    rows = scratch.execute("SELECT cell FROM research_cells WHERE state = 'open' ORDER BY cell LIMIT 2").fetchall()
+    thin, rich = rows[0]["cell"], rows[1]["cell"]
+    researcher = start(scratch, "research", "test-researcher")
+    scratch.execute("UPDATE research_cells SET passes = 0, state = 'done' WHERE state = 'open' AND cell NOT IN (%s, %s)", (thin, rich))
+    scratch.execute("UPDATE research_cells SET passes = 1 WHERE cell IN (%s, %s)", (thin, rich))
+    scratch.execute("DELETE FROM research_leads WHERE cell IN (%s, %s)", (thin, rich))
+    research.store_leads(scratch, thin, [{"key": "Q1", "name": "A", "known": False}], researcher["id"])
+    research.store_leads(scratch, rich, [{"key": f"Q{n}", "name": f"B{n}", "known": False} for n in range(2, 6)],
+                         researcher["id"])
+    assert research.claim(scratch, researcher["id"], deeper=True)["cell"] == rich

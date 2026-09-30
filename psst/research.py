@@ -118,7 +118,7 @@ CELL_STATS = """
 
 
 def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None,
-          near: tuple[float, float] | None = None) -> dict:
+          near: tuple[float, float] | None = None, deeper: bool = False) -> dict:
     """Claim a cell for research. With no cell given, the most wanted open cell: most requested by app
     users first, then the one touching the most finished cells, so coverage grows outward evenly."""
     if cell:
@@ -157,7 +157,16 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
             distance = h3.great_circle_distance(h3.cell_to_latlng(c), middle) if middle else 0
             return (-demand.get(parent, 0), passes.get(c, 0), -existing.get(c, 0), round(distance, 1), c)
 
-        if near:
+        if deeper:
+            # Depth first: the partly researched cell with the most leads nobody has looked at yet.
+            left = {r["cell"]: r["n"] for r in conn.execute(
+                "SELECT cell, count(*) AS n FROM research_leads WHERE status = 'open' GROUP BY cell")}
+            candidates = [r["cell"] for r in open_cells if passes.get(r["cell"], 0) > 0 and left.get(r["cell"])]
+            if not candidates:
+                raise RuntimeError("No partly researched cells with leads left" + (" in that city" if city_id else "")
+                                   + "; claim without --deeper.")
+            cell = max(candidates, key=lambda c: (left[c], c))
+        elif near:
             # The open cell closest to a spot the person asked for ("focus on the Bund").
             cell = min((r["cell"] for r in open_cells),
                        key=lambda c: h3.great_circle_distance(h3.cell_to_latlng(c), near))
