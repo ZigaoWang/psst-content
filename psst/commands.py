@@ -728,6 +728,23 @@ def coverage_command(args) -> int:
     return 0
 
 
+@command("admin", "Build the admin page and upload it to /admin/ (use --out to only write it, as the server does).",
+         arg("--out", help="write the page into this folder instead of uploading it"))
+def admin_command(args) -> int:
+    from . import admin, publish
+    with db.connect() as conn:
+        if args.out:
+            admin.write(conn, Path(args.out))
+            print(f"Wrote {args.out}.")
+            return 0
+        db.require_server_access("Uploading the admin page (use --out to only write it)")
+        directory = admin.write(conn, ROOT / "export" / "admin")
+    config = publish.settings()
+    admin.upload(config["host"], directory)
+    print(f"Uploaded to {config['url']}/admin/.")
+    return 0
+
+
 # Backups ---------------------------------------------------------------------------------------------
 
 @command("backup export", "Write the database as sorted CSV files (the nightly GitHub backup).",
@@ -1006,11 +1023,11 @@ def publish_command(args) -> int:
         runs.finish(conn, run)
     print(f"Promoted {manifest['contentVersion']} to production.")
     try:
-        from . import coverage
+        from . import admin
         with db.connect() as conn:
-            coverage.upload(config["host"], coverage.write(coverage.build(conn), ROOT / "export" / "coverage" / "index.html"))
+            admin.upload(config["host"], admin.write(conn, ROOT / "export" / "admin"))
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
-        print(f"(The coverage map wasn't refreshed: {exc}. Run psst coverage.)")
+        print(f"(The admin page wasn't refreshed: {exc}. It refreshes on its own within 10 minutes.)")
     return 0
 
 
