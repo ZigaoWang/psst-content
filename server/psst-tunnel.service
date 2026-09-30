@@ -1,0 +1,19 @@
+[Unit]
+Description=Psst database tunnel over HTTPS (for Claude Code cloud sessions)
+After=network.target postgresql.service
+
+[Service]
+User=psst
+Group=psst
+EnvironmentFile=/www/wwwroot/psst/tunnel.env
+ExecStart=/www/wwwroot/psst/app/.venv/bin/psst tunnel serve --port 8765
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/www/wwwroot/psst/app
+
+[Install]
+WantedBy=multi-user.target
