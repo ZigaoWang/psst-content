@@ -416,6 +416,7 @@ def places_search(args) -> int:
          arg("--country", required=True, help="ISO country code, e.g. HK"),
          arg("--reload", action="store_true", help="load the country's boundaries again (after changing how they're read)"))
 def city_add(args) -> int:
+    db.require_server_access("Setting up a city")
     import subprocess
     from . import cities, publish
     # The heavy lifting runs on the server, so it gets this code first.
@@ -720,6 +721,7 @@ def coverage_command(args) -> int:
     if args.out:
         print(f"Wrote {path}.")
         return 0
+    db.require_server_access("Uploading the coverage map (use --out to only write it)")
     config = publish.settings()
     coverage.upload(config["host"], path)
     print(f"Uploaded to {config['url']}/coverage/.")
@@ -838,6 +840,7 @@ def images_check(args) -> int:
 @command("images submit", "Store the photos in a checked draft file: our own resized copies, full credit, as drafts.",
          arg("file"), RUN_ARG)
 def images_submit(args) -> int:
+    db.require_server_access("Adding photos")
     from . import images, publish, runs
     entries = json.loads(Path(args.file).read_text(encoding="utf-8"))
     host = publish.settings()["host"]
@@ -862,6 +865,7 @@ def images_submit(args) -> int:
          arg("--focus", default="0.5,0.5", help="the point to keep in view when cropping, as x,y from 0 to 1"),
          arg("--historic", type=int, metavar="YEAR", help="an old photo, taken in this year"))
 def images_upload(args) -> int:
+    db.require_server_access("Uploading a photo")
     from . import images, publish, rules, runs
     settings = db._settings()
     owner = settings.get("PSST_OWNER_NAME", "Zigao Wang")
@@ -956,6 +960,7 @@ def images_retire(args) -> int:
          arg("--only-staging", action="store_true", help="stop after checking staging"),
          arg("--no-new-facts", action="store_true", help="re-export what's published without publishing reviewed facts"))
 def publish_command(args) -> int:
+    db.require_server_access("Publishing")
     from . import export, publish, runs
     config = publish.settings()
     with db.connect(actor="publish") as conn:
@@ -1012,6 +1017,7 @@ def publish_command(args) -> int:
 @command("rollback", "Point production back at an earlier version.",
          arg("--to", dest="version", help="a content version (default: the one before the current)"))
 def rollback_command(args) -> int:
+    db.require_server_access("Rolling back")
     from . import publish
     version = publish.rollback(publish.settings()["host"], args.version)
     print(f"Production now serves {version}.")
@@ -1020,6 +1026,7 @@ def rollback_command(args) -> int:
 
 @command("prune", "Delete pack files no manifest still needs (keeps the last 10 versions).")
 def publish_prune(args) -> int:
+    db.require_server_access("Pruning")
     from . import publish
     print(f"Removed {publish.prune(publish.settings()['host'])} old pack files.")
     return 0
@@ -1033,4 +1040,18 @@ def bundle_command(args) -> int:
     manifest = publish.bundle(publish.settings()["url"], Path(args.app))
     print(f"Bundled {manifest['contentVersion']} ({manifest['counts']['places']} places, "
           f"{manifest['counts']['facts']} facts) into {args.app}/Content/v2. Rebuild the app.")
+    return 0
+
+
+@command("tunnel serve", "Serve the database over HTTPS for machines without SSH (runs on the VPS, behind nginx).",
+         arg("--port", type=int, default=8765))
+def tunnel_serve(args) -> int:
+    import asyncio
+    import logging
+    from . import tunnel
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    token_sha256 = db._settings().get("PSST_TUNNEL_TOKEN_SHA256")
+    if not token_sha256:
+        raise RuntimeError("Set PSST_TUNNEL_TOKEN_SHA256 in the server's env file (server/agent-access.sh does this).")
+    asyncio.run(tunnel.serve_forever(args.port, token_sha256))
     return 0
