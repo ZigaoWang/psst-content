@@ -22,13 +22,14 @@ In a Claude Code cloud session, the tools reach the database through an HTTPS tu
 
 ## Seed a city
 
-Default: 3 cells, one after another, in the city named.
+Default: depth before breadth. Stay in one cell until every lead marked WELL KNOWN is covered and it has at least 20 new places (dense city centers have far more), or until its leads run out; only then claim the next. Quiet cells (parks, suburbs, countryside) are quick: take the next one as soon as the good leads are done. When asked for "N cells", do N cells this way, not N shallow passes. A session that ends with 3 places per cell has spent most of its budget reading briefs and writing skip lists.
 
 1. `uv run psst city list`. If the city isn't there, set it up: `uv run psst city add "<City>" --country <ISO code>`. If it says the name wasn't found, pick the right one from the close matches it lists (the official name, like "Kuala Lumpur" or "Hong Kong").
 2. Start one research run for the session: `uv run psst run start --kind research --model <your model id> --notes "<what you were asked>"`. It prints the run id. Pass it as `--run <id>` to every command that takes one; environment variables may not last from one command to the next.
 3. For each cell:
    - Claim one: `uv run psst research claim --city "<City>"`. Claiming prefers cells with the fewest research passes, so after a partial pass you get a different cell. In a dense cell this takes a few minutes (it sweeps Wikipedia and OpenStreetMap), so give the command up to 10 minutes. If they asked to go deeper, add `--deeper`: it picks the partly researched cell with the most leads left. If they named an area ("around the Bund"), find its coordinates (Wikidata, or a place already in Psst via `uv run psst places search`) and add `--near <lat>,<lon>`.
    - Research it exactly as the guide says (section 5): account for every lead in the brief, add what the sweep can't see, write, tag, check, fix, submit. Read every source with `uv run psst fetch <url> --run <run id>` (guide, section 8): it gets past sites that refuse scripts by reading their Internet Archive copy, and records the read. `draft submit` refuses facts citing a source your run never opened.
+   - Work efficiently: check claims with `uv run psst fetch <url> --run <run id> --find "<names, dates>"` rather than reading whole pages, start from the place's Wikipedia article and follow its references to a second source, and group skipped leads under one reason (`names`). Write as you go, and submit every 10 places or so (`draft submit` again on the same cell adds to it), so nothing is lost if the session ends.
    - If the cell is too big to do well in what's left of your session, submit what's finished and leave the remaining leads with `"later": true`. Never rush facts to finish a cell.
 4. `uv run psst run finish <run id>`.
 5. Report per cell: the neighborhoods, places added, facts written, leads skipped, and leads left for later. Don't review or publish your own drafts.
