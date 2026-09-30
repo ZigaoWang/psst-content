@@ -139,18 +139,23 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
                                "psst research plan, or name a done cell with --cell to revisit it.")
         demand = {r["cell"]: r["n"] for r in conn.execute(
             "SELECT cell, sum(count) AS n FROM demand WHERE day > current_date - %s GROUP BY cell", (DEMAND_DAYS,))}
-        done = {r["cell"] for r in conn.execute("SELECT cell FROM research_cells WHERE state = 'done'")}
         existing = {r["h3_cell"]: r["n"] for r in conn.execute(
             "SELECT h3_cell, count(*) AS n FROM places WHERE state = 'active' GROUP BY h3_cell")}
         passes = {r["cell"]: r["passes"] for r in conn.execute("SELECT cell, passes FROM research_cells")}
+        # Distance from the city's middle: dense centers first, quiet edges last.
+        centers = {r["cell"]: (r["lat"], r["lon"]) for r in conn.execute("""
+            SELECT rc.cell, ST_Y(ST_PointOnSurface(ci.geom)) AS lat, ST_X(ST_PointOnSurface(ci.geom)) AS lon
+            FROM research_cells rc JOIN admin_areas ci ON ci.id = rc.city_id
+            WHERE rc.cell = ANY(%s)""", ([r["cell"] for r in open_cells],))}
 
         # Where people looked first; then cells with the fewest passes, so every cell gets one before any
         # gets a second; then cells that already show rich content (dense areas only partly covered); then
-        # next to finished cells, so coverage grows outward evenly.
+        # nearest the city's middle, so coverage grows outward from the densest parts.
         def priority(c: str) -> tuple:
             parent = h3.cell_to_parent(c, cells.DEMAND_RESOLUTION)
-            return (-demand.get(parent, 0), passes.get(c, 0), -existing.get(c, 0),
-                    -sum(n in done for n in cells.neighbors(c)), c)
+            middle = centers.get(c)
+            distance = h3.great_circle_distance(h3.cell_to_latlng(c), middle) if middle else 0
+            return (-demand.get(parent, 0), passes.get(c, 0), -existing.get(c, 0), round(distance, 1), c)
 
         if near:
             # The open cell closest to a spot the person asked for ("focus on the Bund").
