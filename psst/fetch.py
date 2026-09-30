@@ -179,7 +179,12 @@ def read(url: str, archive: bool = False) -> Page:
     return page
 
 
+WAYBACK = re.compile(r"^(https?://web\.archive\.org/web/\d+)(?!id_)(/.+)$", re.I)
+
+
 def _read(url: str, archive: bool = False) -> Page:
+    # An archive link without "id_" returns the archive's own page around the capture; ask for the capture.
+    url = WAYBACK.sub(r"\1id_\2", url)
     if not archive and url.startswith("http://"):
         # Most sites now answer on https, which is also the only kind of source URL allowed.
         secure = _read("https://" + url[len("http://"):])
