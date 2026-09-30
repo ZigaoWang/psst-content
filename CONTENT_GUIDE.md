@@ -568,7 +568,7 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 - `--no-new-facts`: re-export what's already published, for example to publish a tag merge.
 - `uv run psst rollback` points production back at the previous version (or `--to <version>`); `uv run psst prune` deletes pack files no recent version needs.
 - `uv run psst bundle` copies what production serves into the app repository (`../psst-map/Content/v2`) as the snapshot the app ships with. Do it before an app release, then rebuild the app.
-- `uv run psst coverage` rebuilds the coverage map at `/coverage/` on the Psst site (user `psst`; the password is in `/www/wwwroot/psst/coverage.password` on the server). It shows every cell by state, with place and fact counts, and a heat layer of the empty areas app users looked at most.
+- **The admin page** at `https://psst.zigao.wang/admin/` (user `psst`; the password is in `/www/wwwroot/psst/coverage.password` on the server) shows everything, read-only: totals and per-city progress, every place with its stories, sources, photos, review notes, and history, the review queue, problem reports, runs, demand, publishing, backups, and the coverage map (every cell by state, with a heat layer of the empty areas app users looked at most). The server rebuilds it every 10 minutes and `psst publish` refreshes it at once; `uv run psst admin` rebuilds it by hand.
 
 ## 15. Fixing published content
 

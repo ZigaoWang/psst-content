@@ -61,7 +61,7 @@ A spot check of the facts migrated from the old files, which were never fully ch
 
 ## Status
 
-Run `uv run psst status`, `uv run psst city list`, `uv run psst research wanted`, and `uv run psst review progress`, and summarize in plain words: what's in the app, what's waiting for review, open reports, and where people have been looking. The coverage map is at https://psst.zigao.wang/coverage/.
+Run `uv run psst status`, `uv run psst city list`, `uv run psst research wanted`, and `uv run psst review progress`, and summarize in plain words: what's in the app, what's waiting for review, open reports, and where people have been looking. Everything is also on the admin page, https://psst.zigao.wang/admin/.
 
 ## When something goes wrong
 
