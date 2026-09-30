@@ -619,10 +619,12 @@ def fetch_command(args) -> int:
     print(fetch.render(page, args.max, args.links))
     ok = bool(page.text) and not page.text.startswith(("(Couldn't", "(The archived copy", "(This PDF"))
     if args.run:
+        # The address asked for and the one actually read (an archive copy, a listing's mirror) both count.
         with db.connect() as conn:
-            conn.execute("""INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, %s)
-                            ON CONFLICT (run_id, url_key) DO UPDATE SET ok = source_reads.ok OR EXCLUDED.ok,
-                                read_at = now()""", (args.run, rules.read_key(args.url), ok))
+            for key in {rules.read_key(args.url), rules.read_key(page.url)}:
+                conn.execute("""INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, %s)
+                                ON CONFLICT (run_id, url_key) DO UPDATE SET ok = source_reads.ok OR EXCLUDED.ok,
+                                    read_at = now()""", (args.run, key, ok))
     return 0 if ok else 1
 
 
