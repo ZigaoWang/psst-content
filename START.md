@@ -17,6 +17,8 @@ Everything here happens through `uv run psst ...` in this folder. Before researc
 
 First, always run `uv run psst status`. If it fails, the machine isn't set up (guide, section 3): say so and stop.
 
+In a Claude Code cloud session, the tools reach the database through an HTTPS tunnel (`PSST_TUNNEL_URL`), which is enough to seed and review. Publishing, adding photos, and setting up a new city need SSH access to the server, which cloud sessions don't have; those commands say so. After a cloud review, stop before publishing and report "ready to publish": the person running you publishes from their own machine. Don't commit or push anything; seeding and reviewing need no git.
+
 ## Seed a city
 
 Default: 3 cells, one after another, in the city named.
