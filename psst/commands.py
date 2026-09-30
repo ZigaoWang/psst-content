@@ -595,7 +595,7 @@ def fetch_command(args) -> int:
     from . import fetch, rules
     page = fetch.read(args.url, args.archive)
     print(fetch.render(page, args.max, args.links))
-    ok = bool(page.text) and not page.text.startswith(("(Couldn't", "(The archived copy", "(This is a PDF"))
+    ok = bool(page.text) and not page.text.startswith(("(Couldn't", "(The archived copy", "(This PDF"))
     if args.run:
         with db.connect() as conn:
             conn.execute("""INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, %s)

@@ -7,6 +7,7 @@ from __future__ import annotations
 import gzip
 import html
 import http.client
+import io
 import re
 import zlib
 import urllib.error
@@ -14,6 +15,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+
+import pypdf
 
 from . import net
 
@@ -125,7 +128,7 @@ def _archive_copy(url: str) -> tuple[str, str] | None:
 
 def _page(url: str, status: int, content_type: str, body: bytes, **extra) -> Page:
     if "pdf" in content_type or body[:5] == b"%PDF-":
-        return Page(url, status, "", "(This is a PDF. Open it another way; the text can't be read here.)", **extra)
+        return _pdf(url, status, body, **extra)
     charset = re.search(r"charset=([\w-]+)", content_type)
     decoded = body.decode(charset.group(1) if charset else "utf-8", errors="replace")
     if "html" not in content_type and not decoded.lstrip().startswith("<"):
@@ -141,8 +144,27 @@ def _page(url: str, status: int, content_type: str, body: bytes, **extra) -> Pag
     return Page(url, status, html.unescape(parser.title).strip(), parser.text(), links=links, **extra)
 
 
+def _pdf(url: str, status: int, body: bytes, **extra) -> Page:
+    """A PDF's text, page by page. Scanned PDFs have no text layer and come back empty."""
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(body))
+        pages = [f"[Page {n}]\n{(page.extract_text() or '').strip()}" for n, page in enumerate(reader.pages, 1)]
+        title = str((reader.metadata or {}).get("/Title") or "")
+    except Exception:  # pypdf raises many kinds of errors on damaged files
+        return Page(url, status, "", "(This PDF couldn't be read.)", **extra)
+    text = "\n\n".join(pages).strip()
+    if not re.search(r"\w{3}", text.replace("[Page", "")):
+        text = "(This PDF has no text to read; it's probably scanned images.)"
+    return Page(url, status, title, text, **extra)
+
+
 def read(url: str, archive: bool = False) -> Page:
     """Read a page. With `archive`, go straight to the Internet Archive."""
+    if not archive and url.startswith("http://"):
+        # Most sites now answer on https, which is also the only kind of source URL allowed.
+        secure = read("https://" + url[len("http://"):])
+        if secure.text and not secure.text.startswith("(Couldn't"):
+            return secure
     if not archive:
         status, content_type, body = _get(url)
         if 200 <= status < 400 and body:

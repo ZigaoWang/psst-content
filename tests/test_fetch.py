@@ -11,8 +11,16 @@ def test_pages_become_readable_text():
     assert "Menu" not in page.text and "Cookies" not in page.text and "x()" not in page.text
 
 
-def test_pdfs_are_flagged():
-    assert "PDF" in fetch._page("https://example.org/a.pdf", 200, "application/pdf", b"%PDF-1.7").text
+def test_pdfs_are_read():
+    import io
+    import pypdf
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(200, 200)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    blank = fetch._page("https://example.org/a.pdf", 200, "application/pdf", buffer.getvalue())
+    assert "no text" in blank.text
+    assert "couldn't be read" in fetch._page("https://example.org/b.pdf", 200, "application/pdf", b"%PDF-1.7 broken").text
 
 
 def test_compressed_captures_are_read():
