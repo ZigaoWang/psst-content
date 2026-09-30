@@ -58,6 +58,16 @@ All tables live in the `psst` schema. The SQL is in `db/migrations/`, applied in
   - `retired_at` and `retire_reason`
 - `fact_events` records every state change, edit (with the fields changed), and review flag, with who made it, in which run, and why. A trigger writes it, so nothing can skip it.
 
+### Photos
+
+`images` holds one row per photo of a place, with the same lifecycle as a fact (`draft`, `reviewed`, `published`, `retired`) and the same provenance (the run that added it, the run that reviewed it, notes).
+
+- `kind` is `photo` or `historic`; a historic photo has the `year` it was taken, so the app can show "then and now" later.
+- Full attribution, copied from the source's own metadata and never typed: `source` (`commons`, `geograph`, `flickr`, `archive`, or `owner`), `source_ref`, `source_url`, `title`, `author`, `author_url`, `license`, `license_url`. Only free licenses are accepted.
+- `alt_text` for VoiceOver, and a focus point (`focus_x`, `focus_y`, 0 to 1 from the top left) the app keeps in view when it crops.
+- Our own copies, named by their hash: `full_file` (1,920 px on the long side) and `thumb_file` (640 px), progressive JPEGs with all metadata removed, served from `/images/`.
+- `image_events` records every change, like `fact_events`; `image_views` records which photos a review run actually looked at, and approving one it never opened is refused.
+
 `sources` stores each URL once: normalized `url`, `title`, `publisher`, `language`, `archived_url`, and the result of the last link check. `fact_sources` links facts to sources in order.
 
 ### Tags
@@ -119,7 +129,7 @@ Every Saturday `psst sources check` requests every cited link; a source that fai
 - **Version 2** is a set of static files under `/content/<channel>/v2/`, where the channel is `staging` or `production`:
   - `manifest.json`: `formatVersion`, `contentVersion`, `generatedAt`, and the list of packs with their size and SHA-256.
   - `packs/common.<hash>.json.gz`: cities, the hierarchy, tags, and the legacy id map.
-  - `packs/city-<id>.<hash>.json.gz`: one per city, with its places, names, and published facts.
+  - `packs/city-<id>.<hash>.json.gz`: one per city, with its places, names, published facts, and published photos (credit, alt text, focus, and the file names under `/images/`). `images` is optional, so older apps ignore it.
 - **Immutability:** pack files are named by their hash, so they never change once written. Promoting to production only swaps `manifest.json`, which is atomic. Old manifests are kept, so `psst rollback` is instant.
 - **Offline:** the app ships with a snapshot of production (`psst bundle` copies it into the app before a build), so it works offline from the first launch.
 - **Updates:** in the background it fetches the manifest and downloads only the packs whose hashes changed. It checks each hash, decodes everything, and only then swaps the new set in as the current content. Anything that fails leaves the previous content in place. The app always keeps the last good version.
@@ -132,6 +142,7 @@ Before promotion, `psst publish` downloads the staging files over HTTPS and chec
 - Every hash matches.
 - Every pack validates against its schema in `format/v2/`, and every reference resolves (places to areas, facts to tags).
 - Every legacy id still resolves.
+- Every photo file new since production is served under `/images/`.
 - The number of published places and facts hasn't dropped by more than 2 percent from production, unless `--allow-shrink` is given with a reason.
 
 ## Languages
@@ -153,7 +164,7 @@ Search runs on the device over everything downloaded, so it works offline:
 
 ## Hosting
 
-- **Files:** nginx on the VPS serves `psst.zigao.wang` (and `psst.67-230-170-225.sslip.io`, which works before DNS is set up), with TLS from Let's Encrypt, a long cache for packs, and no cache for manifests.
+- **Files:** nginx on the VPS serves `psst.zigao.wang` (and `psst.67-230-170-225.sslip.io`, which works before DNS is set up), with TLS from Let's Encrypt, a long cache for packs and photos, and no cache for manifests.
 - **Service:** `psst-api` is a small Python service run by systemd, reachable only through nginx, with nginx rate limits. It accepts reports and demand signals and writes them to the database with a role that can do nothing else.
 - **Isolation:** the database, role, directory (`/www/wwwroot/psst`), service, and nginx server block are all separate from the other sites on the box.
 - **Privacy:** the privacy policy is served at `https://psst.zigao.wang/privacy` and linked in the app. The App Store label declares:
