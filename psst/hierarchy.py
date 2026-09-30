@@ -54,6 +54,21 @@ EXCLUDED_AREAS = {
     85792207: "Who's On First labels a patch of Kensal Town in West London as West Tilbury, a village in Essex.",
 }
 
+# Boundaries whose shape is right but whose name in the source data is wrong. Applied after every load
+# and rename, so they survive reloading the source.
+NAME_FIXES = {
+    85861625: "Bishopsgate",  # Who's On First calls this patch of the City of London "Bishopstone".
+}
+
+
+def apply_name_fixes(conn) -> int:
+    fixed = 0
+    for area_id, name in NAME_FIXES.items():
+        fixed += conn.execute("UPDATE admin_areas SET name = %s WHERE id = %s AND name <> %s",
+                              (name, area_id, name)).rowcount
+    return fixed
+
+
 # Suffixes that only say what kind of division an area is, dropped from English names.
 NAME_SUFFIXES = (" Subdistrict", " subdistrict", " Sub-district", " sub-district", " Residential District")
 
@@ -160,6 +175,7 @@ def load_wof(conn, path: Path, country: str) -> int:
                        WHERE country_code = %s AND source = 'wof'""", (country,))
         index_parts(conn, [r["id"] for r in cur.execute(
             "SELECT id FROM s_wof WHERE id IN (SELECT id FROM admin_areas)").fetchall()])
+        apply_name_fixes(conn)
         cur.execute("DELETE FROM admin_area_names WHERE area_id IN (SELECT id FROM s_wof)")
         cur.execute("""INSERT INTO admin_area_names (area_id, lang, name)
                        SELECT s.id, n.key, n.value FROM s_wof s JOIN admin_areas a ON a.id = s.id,
@@ -326,6 +342,7 @@ def english_names_from_wikidata(conn, place_ids: list[str] | None = None) -> int
                                     ON CONFLICT (area_id, lang) DO UPDATE SET name = EXCLUDED.name""",
                                  (area["id"], lang, labels[code]["value"]))
                     break
+    apply_name_fixes(conn)
     return updated
 
 
