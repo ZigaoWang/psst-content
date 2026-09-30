@@ -137,7 +137,9 @@ def commons_files(titles: list[str], found_via: str) -> list[Candidate]:
             title = page["title"]
             year = _year(meta.get("DateTimeOriginal")) or _year(meta.get("DateTime"))
             image_url = info.get("thumburl") or info["url"]
-            preview = re.sub(r"/\d+px-", f"/{PREVIEW_EDGE}px-", image_url) if "/thumb/" in image_url else image_url
+            # Works for every file, including ones too small to have a thumbnail at the full size.
+            preview = (f"https://commons.wikimedia.org/wiki/Special:FilePath/"
+                       f"{urllib.parse.quote(title.removeprefix('File:'))}?width={PREVIEW_EDGE}")
             found.append(Candidate(
                 key=f"commons:{title}", source="commons", source_ref=title,
                 source_url=info.get("descriptionurl") or f"https://commons.wikimedia.org/wiki/{urllib.parse.quote(title)}",
@@ -314,7 +316,9 @@ def upload(host: str, files: list[Rendition]) -> None:
         for f in files:
             (Path(scratch) / f.name).write_bytes(f.data)
         subprocess.run(["ssh", host, f"mkdir -p {REMOTE_DIR}"], check=True)
-        subprocess.run(["rsync", "-a", "--ignore-existing", f"{scratch}/", f"{host}:{REMOTE_DIR}/"], check=True)
+        # Readable by the web server whatever the local folder's permissions and owner were.
+        subprocess.run(["rsync", "-rt", "--ignore-existing", "--no-owner", "--no-group", "--chmod=D755,F644",
+                        f"{scratch}/", f"{host}:{REMOTE_DIR}/"], check=True)
 
 
 # Drafts -------------------------------------------------------------------------------------------------
