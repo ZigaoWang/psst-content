@@ -130,8 +130,7 @@ def _archive_copy(url: str) -> tuple[str, str] | None:
 def _page(url: str, status: int, content_type: str, body: bytes, **extra) -> Page:
     if "pdf" in content_type or body[:5] == b"%PDF-":
         return _pdf(url, status, body, **extra)
-    charset = re.search(r"charset=([\w-]+)", content_type)
-    decoded = body.decode(charset.group(1) if charset else "utf-8", errors="replace")
+    decoded = _decode(body, content_type)
     if "html" not in content_type and not decoded.lstrip().startswith("<"):
         return Page(url, status, "", decoded, **extra)
     parser = _Text()
@@ -143,6 +142,27 @@ def _page(url: str, status: int, content_type: str, body: bytes, **extra) -> Pag
             seen.add(absolute)
             links.append((text, absolute))
     return Page(url, status, html.unescape(parser.title).strip(), parser.text(), links=links, **extra)
+
+
+def _decode(body: bytes, content_type: str) -> str:
+    """Text in its declared encoding: the HTTP header, else the page's own <meta> tag (archived copies often lose
+    the header), else UTF-8, else GB18030 for older Chinese pages that declare nothing."""
+    declared = re.search(r"charset=[\"']?([\w-]+)", content_type) or \
+        re.search(rb"<meta[^>]+charset=[\"']?([\w-]+)", body[:4096], re.I)
+    name = declared.group(1) if declared else None
+    if isinstance(name, bytes):
+        name = name.decode("ascii", "ignore")
+    if name and name.lower() in ("gb2312", "gbk", "gb_2312-80"):
+        name = "gb18030"  # a superset of both, so characters outside GB2312 still decode
+    if name:
+        try:
+            return body.decode(name, errors="replace")
+        except LookupError:
+            pass
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body.decode("gb18030", errors="replace")
 
 
 def _pdf(url: str, status: int, body: bytes, **extra) -> Page:
