@@ -249,6 +249,24 @@ def tags_retype(args) -> int:
     return 0
 
 
+@command("tags link", "Set or correct the Wikidata item a tag stands for.", arg("tag"), arg("qid"), RUN_ARG)
+def tags_link(args) -> int:
+    import re
+    from . import runs
+    if not re.fullmatch(r"Q[1-9][0-9]*", args.qid):
+        raise RuntimeError("the Wikidata id looks like Q42")
+    with db.connect(actor="tags") as conn:
+        runs.require(conn, args.run, "tagging")
+        other = conn.execute("SELECT id, canonical_name FROM tags WHERE wikidata_id = %s AND id <> %s",
+                             (args.qid, args.tag)).fetchone()
+        if other:
+            raise RuntimeError(f"{args.qid} already belongs to {other['id']} ({other['canonical_name']}); merge the tags instead")
+        if not conn.execute("UPDATE tags SET wikidata_id = %s WHERE id = %s RETURNING id", (args.qid, args.tag)).fetchone():
+            raise RuntimeError(f"No tag {args.tag}")
+    print(f"{args.tag} now stands for {args.qid}.")
+    return 0
+
+
 @command("tags alias", "Add or remove another way of writing a tag.",
          arg("tag"), arg("alias"), arg("--remove", action="store_true"), RUN_ARG)
 def tags_alias(args) -> int:
