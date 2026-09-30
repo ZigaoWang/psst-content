@@ -18,7 +18,11 @@ LONG = ("The bench faces the wrong way on purpose. When the square was laid out 
 
 @pytest.fixture
 def cell(scratch):
-    row = scratch.execute("SELECT cell FROM research_cells WHERE state = 'open' ORDER BY cell LIMIT 1").fetchone()
+    # An untouched cell: no leads, no passes, no places, so real research can't leak into a test.
+    row = scratch.execute("""SELECT rc.cell FROM research_cells rc WHERE rc.state = 'open' AND rc.passes = 0
+                             AND NOT EXISTS (SELECT 1 FROM research_leads l WHERE l.cell = rc.cell)
+                             AND NOT EXISTS (SELECT 1 FROM places p WHERE p.h3_cell = rc.cell)
+                             ORDER BY rc.cell LIMIT 1""").fetchone()
     if not row:
         pytest.skip("no open research cells")
     return row["cell"]
@@ -31,9 +35,11 @@ def start(conn, kind, model):
 
 def read_sources(conn, run_id, fact_id):
     """What `psst fetch <url> --run <id>` records for each of the fact's sources."""
-    conn.execute("""INSERT INTO source_reads (run_id, url_key, ok)
-                    SELECT %s, s.url_key, true FROM fact_sources fs JOIN sources s ON s.id = fs.source_id
-                    WHERE fs.fact_id = %s ON CONFLICT DO NOTHING""", (run_id, fact_id))
+    from psst import rules
+    for row in conn.execute("""SELECT s.url FROM fact_sources fs JOIN sources s ON s.id = fs.source_id
+                               WHERE fs.fact_id = %s""", (fact_id,)).fetchall():
+        conn.execute("INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, true) ON CONFLICT DO NOTHING",
+                     (run_id, rules.read_key(row["url"])))
 
 
 def read_draft_sources(conn, run_id, draft):
@@ -43,7 +49,7 @@ def read_draft_sources(conn, run_id, draft):
         for fact in place["facts"]:
             for source in fact["sources"]:
                 conn.execute("INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, true) ON CONFLICT DO NOTHING",
-                             (run_id, rules.normalize_url(source["url"])))
+                             (run_id, rules.read_key(source["url"])))
 
 
 def draft_for(cell, tag_id):
@@ -313,5 +319,5 @@ def test_research_must_open_its_sources(scratch, cell, tag_id):
         research.submit(scratch, draft, researcher, checked)
     from psst import rules
     scratch.execute("INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, true)",
-                    (researcher["id"], rules.normalize_url("https://example.org/test-bench")))
+                    (researcher["id"], rules.read_key("https://example.org/test-bench")))
     assert research.submit(scratch, draft, researcher, checked)["facts"] == 1
