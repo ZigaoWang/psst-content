@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://psst.zigao.wang/format/v2/city.schema.json",
   "title": "Psst city pack, format 2",
-  "description": "Every published place in one city, with its published facts. Coordinates are WGS-84.",
+  "description": "Every published place in one city, with its published facts and photos. Coordinates are WGS-84. Photo files are at <content host>/images/<file>.",
   "type": "object",
   "required": ["formatVersion", "cityId", "places"],
   "properties": {
@@ -38,6 +38,36 @@
           "countryCode": {"type": ["string", "null"]},
           "districtId": {"type": ["string", "null"]},
           "neighborhoodId": {"type": ["string", "null"]},
+          "images": {
+            "type": "array",
+            "description": "Optional; in display order. Older apps ignore it.",
+            "items": {
+              "type": "object",
+              "required": ["id", "kind", "alt", "focus", "full", "thumb", "credit"],
+              "properties": {
+                "id": {"type": "string", "pattern": "^im_[0-9a-hjkmnp-tv-z]{10}$"},
+                "kind": {"enum": ["photo", "historic"]},
+                "year": {"type": ["integer", "null"]},
+                "alt": {"type": "string", "minLength": 10, "maxLength": 300},
+                "focus": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 2, "maxItems": 2},
+                "full": {"$ref": "#/$defs/rendition"},
+                "thumb": {"$ref": "#/$defs/rendition"},
+                "credit": {
+                  "type": "object",
+                  "required": ["author", "license", "sourceUrl"],
+                  "properties": {
+                    "author": {"type": "string", "minLength": 1},
+                    "authorUrl": {"type": ["string", "null"]},
+                    "license": {"type": "string", "minLength": 1},
+                    "licenseUrl": {"type": ["string", "null"]},
+                    "sourceUrl": {"type": "string", "pattern": "^https://"},
+                    "source": {"enum": ["commons", "geograph", "flickr", "archive", "owner"]},
+                    "title": {"type": ["string", "null"]}
+                  }
+                }
+              }
+            }
+          },
           "facts": {
             "type": "array",
             "minItems": 1,
@@ -71,6 +101,17 @@
             }
           }
         }
+      }
+    }
+  },
+  "$defs": {
+    "rendition": {
+      "type": "object",
+      "required": ["file", "width", "height"],
+      "properties": {
+        "file": {"type": "string", "pattern": "^[0-9a-f]{24}\\.jpg$"},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
       }
     }
   }

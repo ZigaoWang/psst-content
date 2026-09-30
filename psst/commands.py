@@ -801,6 +801,154 @@ def _create_database(name: str, migrations: list[str] | None = None) -> None:
     db.migrate(_database_url(name), migrations)
 
 
+# Images ------------------------------------------------------------------------------------------------
+
+IMAGE_WORK = ROOT / "work" / "images"
+
+
+@command("images find", "Find freely licensed photos for places and save them, with previews, to work/images/<place>/.",
+         arg("--city", help="places in this city without photos, the ones with the most stories first"),
+         arg("--place", help="one place (even if it already has photos)"),
+         arg("--limit", type=int, default=10, help="how many places (default 10)"))
+def images_find(args) -> int:
+    from . import images
+    if not args.city and not args.place:
+        raise RuntimeError("Say which places: --city NAME or --place ID")
+    with db.connect() as conn:
+        places = images.places_needing_images(conn, args.city, args.place, args.limit)
+    if not places:
+        print("No places need photos there.")
+    for place in places:
+        candidates = images.find(place, db._settings())
+        listing = images.write_candidates(place, candidates, IMAGE_WORK / place["id"])
+        print(f"{place['id']}  {place['name']}: {len(candidates)} candidates, see {listing}")
+    return 0
+
+
+@command("images check", "Check an images draft file (see CONTENT_GUIDE.md, Photos).", arg("file"))
+def images_check(args) -> int:
+    from . import images
+    entries = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    with db.connect() as conn:
+        report = images.check_draft(conn, entries, IMAGE_WORK)
+    _print_report(report, args.file)
+    return 0 if report.ok else 1
+
+
+@command("images submit", "Store the photos in a checked draft file: our own resized copies, full credit, as drafts.",
+         arg("file"), RUN_ARG)
+def images_submit(args) -> int:
+    from . import images, publish, runs
+    entries = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    host = publish.settings()["host"]
+    with db.connect(actor="research", run=args.run, note="Photo added in research.") as conn:
+        run = runs.require(conn, args.run, "research")
+        report = images.check_draft(conn, entries, IMAGE_WORK)
+        if not report.ok:
+            _print_report(report, args.file)
+            return 1
+        for entry in entries:
+            candidate = images.load_candidates(IMAGE_WORK, entry["place"])[entry["key"]]
+            image_id = images.add(conn, host, run, entry["place"], candidate, entry["alt"],
+                                  entry.get("focus", [0.5, 0.5]), entry.get("kind", "photo"), entry.get("year"))
+            print(f"{image_id}  {entry['place']}  {candidate.title} ({candidate.license}, {candidate.author})")
+    print(f"Stored {len(entries)} photos as drafts for review.")
+    return 0
+
+
+@command("images upload", "Add your own photo of a place, credited to you. It goes through review like any other.",
+         arg("file", help="a JPEG or PNG you took (export HEIC from Photos as JPEG)"), arg("--place", required=True),
+         arg("--alt", required=True, help="what the photo shows, for VoiceOver"),
+         arg("--focus", default="0.5,0.5", help="the point to keep in view when cropping, as x,y from 0 to 1"),
+         arg("--historic", type=int, metavar="YEAR", help="an old photo, taken in this year"))
+def images_upload(args) -> int:
+    from . import images, publish, rules, runs
+    settings = db._settings()
+    owner = settings.get("PSST_OWNER_NAME", "Zigao Wang")
+    owner_url = settings.get("PSST_OWNER_URL", "https://www.zigao.wang/")
+    focus = [float(v) for v in args.focus.split(",")]
+    entry = {"focus": focus, "kind": "historic" if args.historic else "photo", "year": args.historic}
+    report = rules.Report()
+    images.check_alt(args.place, args.alt, report)
+    images.check_details(args.place, entry, report)
+    if not report.ok:
+        _print_report(report, args.file)
+        return 1
+    with db.connect(actor=owner) as conn:
+        run_id = runs.start(conn, "manual", None, notes=f"Photo upload: {Path(args.file).name}")
+    with db.connect(actor=owner, run=run_id, note="Owner's photo.") as conn:
+        run = runs.require(conn, run_id)
+        image_id = images.add_owner_photo(conn, publish.settings()["host"], run, args.place, Path(args.file), owner,
+                                          owner_url, args.alt, focus, entry["kind"], args.historic)
+        runs.finish(conn, run_id)
+    print(f"Stored {image_id} as a draft, credited to {owner}. A review approves it, then psst publish.")
+    return 0
+
+
+@command("images next", "Write the next photos to review (flagged ones first, then drafts) to a file.",
+         arg("--out", required=True), arg("--limit", type=int, default=20), RUN_ARG)
+def images_next(args) -> int:
+    from . import images, runs
+    with db.connect() as conn:
+        runs.require(conn, args.run, "review")
+        rows = images.review_queue(conn, args.limit)
+    Path(args.out).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"Wrote {len(rows)} photos to {args.out}. Look at each with psst images show <id> --run <run id>.")
+    return 0
+
+
+@command("images show", "Download the copy readers will see, for a reviewer to look at, and record that the run did.",
+         arg("image"), RUN_ARG)
+def images_show(args) -> int:
+    from . import images, publish, runs
+    with db.connect() as conn:
+        run = runs.require(conn, args.run, "review")
+        path = images.show(conn, publish.settings()["url"], run, args.image, IMAGE_WORK / "review")
+    print(f"Open {path} and look at it.")
+    return 0
+
+
+@command("images apply", "Apply photo review decisions from a JSON file (see CONTENT_GUIDE.md, Photos).",
+         arg("file"), arg("--dry-run", action="store_true", help="only check the decisions"), RUN_ARG)
+def images_apply(args) -> int:
+    from . import images, runs
+    decisions = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    with db.connect(actor="review", run=args.run, note="Photo review decision.") as conn:
+        run = runs.require(conn, args.run, "review")
+        report = images.check_decisions(conn, decisions, run)
+        if not report.ok or args.dry_run:
+            _print_report(report, args.file)
+            return 0 if report.ok else 1
+        counts = images.apply_decisions(conn, decisions, run)
+    print(f"Approved {counts['approve']}, edited {counts['edit']}, rejected {counts['reject']}. psst publish shows them.")
+    return 0
+
+
+@command("images flag", "Send a published photo back for review.", arg("image"),
+         arg("--reason", required=True, help="what looks wrong (kept in the photo's history)"))
+def images_flag(args) -> int:
+    with db.connect(actor="review", note=f"Flagged: {args.reason}") as conn:
+        row = conn.execute("UPDATE images SET needs_review = true WHERE id = %s AND state <> 'retired' RETURNING id",
+                           (args.image,)).fetchone()
+    if not row:
+        raise RuntimeError(f"No live image {args.image}")
+    print(f"Flagged {args.image}. It stays up until a review decides; psst images next lists it first.")
+    return 0
+
+
+@command("images retire", "Take a photo down (at the next publish), for example when its license turns out wrong.",
+         arg("image"), arg("--reason", required=True))
+def images_retire(args) -> int:
+    with db.connect(actor="review", note=args.reason) as conn:
+        row = conn.execute("""UPDATE images SET state = 'retired', retired_at = now(), retire_reason = %s,
+                                  needs_review = false WHERE id = %s AND state <> 'retired' RETURNING id""",
+                           (args.reason, args.image)).fetchone()
+    if not row:
+        raise RuntimeError(f"No live image {args.image}")
+    print(f"Retired {args.image}. Run psst publish --no-new-facts to take it out of the app.")
+    return 0
+
+
 # Publishing ------------------------------------------------------------------------------------------
 
 @command("publish", "Publish reviewed facts: export, stage, check staging, promote to production.",
@@ -815,9 +963,11 @@ def publish_command(args) -> int:
     with db.connect(actor="publish", run=run) as conn:
         reviewed = [] if args.no_new_facts else [r["id"] for r in conn.execute(
             "SELECT id FROM facts WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
-        result = export.build(conn, ROOT / "export", include=reviewed)
-    print(f"Exported {result.places} places and {result.facts} facts ({len(reviewed)} newly published) "
-          f"as {result.manifest['contentVersion']}.")
+        reviewed_images = [] if args.no_new_facts else [r["id"] for r in conn.execute(
+            "SELECT id FROM images WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
+        result = export.build(conn, ROOT / "export", include=reviewed, include_images=reviewed_images)
+    print(f"Exported {result.places} places, {result.facts} facts ({len(reviewed)} newly published), and "
+          f"{len(result.images)} photos as {result.manifest['contentVersion']}.")
     publish.upload_staging(config["host"], result.directory)
     print(f"Uploaded to staging. Checking {config['url']}/content/staging/ ...")
     problems = publish.check_staging(config["url"], args.allow_shrink)
@@ -838,6 +988,9 @@ def publish_command(args) -> int:
     with db.connect(actor="publish", run=run, note="Published through staging.") as conn:
         conn.execute("UPDATE facts SET state = 'published', published_at = now() "
                      "WHERE id = ANY(%s) AND state = 'reviewed'", (reviewed,))
+        # A reviewed photo of a place with no published story yet waits for the next publish.
+        conn.execute("UPDATE images SET state = 'published', published_at = now() "
+                     "WHERE id = ANY(%s) AND state = 'reviewed'", (result.images,))
         conn.execute("INSERT INTO publications (channel, content_version, manifest, places, facts, run_id) "
                      "VALUES ('production', %s, %s, %s, %s, %s)",
                      (manifest["contentVersion"], json.dumps(manifest), result.places, result.facts, run))

@@ -10,7 +10,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +33,7 @@ class Export:
     manifest: dict
     places: int
     facts: int
+    images: list[str] = field(default_factory=list)  # ids of every photo exported
 
 
 def _schema(name: str) -> dict:
@@ -54,9 +55,9 @@ def _names(rows, key_name="lang") -> dict[str, str]:
     return {r[key_name]: r["name"] for r in rows}
 
 
-def build(conn, out_root: Path, include: list[str] = ()) -> Export:
-    """Export everything published, plus the facts in `include` (reviewed facts about to be published),
-    into a new directory under out_root. Raises ExportError, and writes nothing usable, if any exported
+def build(conn, out_root: Path, include: list[str] = (), include_images: list[str] = ()) -> Export:
+    """Export everything published, plus the facts in `include` and the images in `include_images` (reviewed
+    ones about to be published), into a new directory under out_root. Raises ExportError, and writes nothing usable, if any exported
     fact breaks the writing rules or any pack fails its schema."""
     facts = conn.execute("""
         SELECT f.id, f.place_id, f.category, f.veracity, f.headline, f.short, f.long, f.researched_at,
@@ -116,6 +117,21 @@ def build(conn, out_root: Path, include: list[str] = ()) -> Export:
             "lastVerified": f["last_verified_at"].date().isoformat() if f["last_verified_at"] else None,
         })
 
+    images_by_place: dict[str, list[dict]] = {}
+    for i in conn.execute("""
+            SELECT * FROM images WHERE place_id = ANY(%s)
+              AND (state = 'published' OR (state = 'reviewed' AND id = ANY(%s)))
+            ORDER BY place_id, position, id""", (place_ids, list(include_images))):
+        images_by_place.setdefault(i["place_id"], []).append({
+            "id": i["id"], "kind": i["kind"], "year": i["year"], "alt": i["alt_text"],
+            "focus": [round(i["focus_x"], 3), round(i["focus_y"], 3)],
+            "full": {"file": i["full_file"], "width": i["full_width"], "height": i["full_height"]},
+            "thumb": {"file": i["thumb_file"], "width": i["thumb_width"], "height": i["thumb_height"]},
+            "credit": {"author": i["author"], "authorUrl": i["author_url"], "license": i["license"],
+                       "licenseUrl": i["license_url"], "sourceUrl": i["source_url"], "source": i["source"],
+                       "title": i["title"]},
+        })
+
     by_group: dict[int, list[dict]] = {}
     area_ids: set[int] = set()
     for p in places:
@@ -128,6 +144,7 @@ def build(conn, out_root: Path, include: list[str] = ()) -> Export:
             "districtId": str(p["district_id"]) if p["district_id"] else None,
             "neighborhoodId": str(p["neighborhood_id"]) if p["neighborhood_id"] else None,
             "facts": facts_by_place[p["id"]],
+            **({"images": images_by_place[p["id"]]} if p["id"] in images_by_place else {}),
         })
 
     groups = conn.execute("""
@@ -188,7 +205,8 @@ def build(conn, out_root: Path, include: list[str] = ()) -> Export:
     }
     jsonschema.validate(manifest, _schema("manifest"))
     (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    return Export(directory, manifest, len(places), len(facts))
+    exported_images = [i["id"] for p in places if p["id"] in images_by_place for i in images_by_place[p["id"]]]
+    return Export(directory, manifest, len(places), len(facts), exported_images)
 
 
 def load_pack(directory: Path, entry: dict) -> dict:

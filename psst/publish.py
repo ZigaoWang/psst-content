@@ -12,6 +12,7 @@ import hashlib
 import json
 import shlex
 import subprocess
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -72,6 +73,20 @@ def fetch_channel(base_url: str, channel: str) -> tuple[dict, dict, dict[str, di
     return manifest, common, cities
 
 
+def _served(url: str) -> bool:
+    request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": net.USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status == 200 and response.headers.get("Content-Type", "").startswith("image/")
+    except (urllib.error.URLError, TimeoutError):
+        return False
+
+
+def image_files(cities: dict[str, dict]) -> set[str]:
+    return {image[size]["file"] for city in cities.values() for place in city["places"]
+            for image in place.get("images", []) for size in ("full", "thumb")}
+
+
 def check_staging(base_url: str, allow_shrink: str | None = None) -> list[str]:
     """Everything that must be true before users get this content. Returns problems; empty means go."""
     problems: list[str] = []
@@ -107,6 +122,11 @@ def check_staging(base_url: str, allow_shrink: str | None = None) -> list[str]:
                     problems.append(f"{fact['id']} refers to unpublished tags {missing}")
 
     live = fetch_channel(base_url, "production")
+    # Every photo file the packs name must be served; new ones are checked one by one.
+    new_files = image_files(cities) - (image_files(live[2]) if live else set())
+    for name in sorted(new_files):
+        if not _served(f"{base_url}/images/{name}"):
+            problems.append(f"photo file {name} isn't served at /images/")
     if live:
         live_manifest, live_common, _ = live
         lost = [old for old in live_common["legacyIds"] if old not in common["legacyIds"]]
