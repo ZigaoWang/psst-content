@@ -38,13 +38,18 @@ TABLES = [
     ("reports", "id"),
     ("demand", "cell, day"),
     ("publications", "id"),
+    ("research_leads", "cell, key"),
+    ("source_reads", "run_id, url_key"),
+    ("images", "id"),
+    ("image_events", "id"),
+    ("image_views", "run_id, image_id"),
 ]
 USED_AREAS = """WITH RECURSIVE used(id) AS (
         SELECT id FROM (SELECT unnest(ARRAY[region_id, city_id, district_id, neighborhood_id]) FROM psst.places
                         UNION SELECT city_id FROM psst.research_cells) seed(id) WHERE id IS NOT NULL
         UNION SELECT a.parent_id FROM psst.admin_areas a JOIN used u ON a.id = u.id WHERE a.parent_id IS NOT NULL)
     SELECT id FROM used"""
-SERIALS = ["fact_events", "reports", "publications"]
+SERIALS = ["fact_events", "reports", "publications", "image_events"]
 
 
 def _columns(conn, table: str) -> list[str]:
