@@ -8,7 +8,8 @@ The person running you will say what to do in a few words, for example:
 - `seed london deeper` (more passes on the partly done cells with the most left, instead of new cells)
 - `photos london` (or `photos london, 20 places`)
 - `review`
-- `check the old content`
+- `check the old content` (a quick spot check per city)
+- `verify london` (check every old story in a city, as cheaply as possible)
 - `status`
 
 Work out which task it is and any details they gave (city, how many cells, an area to focus on, anything to avoid), then follow that section below. Where they didn't say, use the defaults. Don't ask questions you can answer yourself; ask only when the request is truly unclear.
@@ -58,6 +59,20 @@ A spot check of the facts migrated from the old files, which were never fully ch
 1. Start a review run, as above.
 2. For each city in `uv run psst city list` that has places: `uv run psst review next --verify --sample --limit 60 --city "<City>" --out work/review.json`, then review them exactly like drafts.
 3. Publish, finish the run, and report per city how many were wrong and what kind of mistakes you found. If a city looks bad (more than a few wrong), say so: it needs a full check (`--verify` without `--sample`).
+
+## Verify old content
+
+For checking every migrated story in a city, not just a sample. These stories passed the old validator, so most are fine: the job is to catch the ones that aren't, while spending as little as possible on the rest. Default: batches of 40, until the city is done or the session is nearly full. It runs fine in a cloud session.
+
+1. Start a review run, as above.
+2. `uv run psst review next --verify --city "<City>" --limit 40 --out work/review.json`.
+3. For each story, check its specific claims (names, dates, numbers, "the first", "the only") against its sources with `uv run psst fetch <url> --run <run id> --find "<those words>"`. `--find` shows only the passages mentioning them, which is usually all you need and costs a fraction of the whole page. Search again with other words if the first try misses; read the whole page (no `--find`) only when the passages don't settle it. Several stories often cite the same page: fetch it once and check them all.
+4. Decide, and keep notes to one line naming what confirmed each claim:
+   - **approve** when every claim holds;
+   - **edit** only to fix what's wrong (a date, a number, an overstatement, veracity that should be `legend`). Don't rewrite stories that are right just to improve the style;
+   - **reject** when the central claim isn't in any source and can't be fixed from them.
+5. Dry-run and apply as in "Review and publish", then take the next batch. In a cloud session, don't publish: report "ready to publish". Otherwise publish once at the end.
+6. Finish the run and report: how many checked, approved, edited, rejected, and what went wrong most often. `uv run psst review progress` shows how much of each city is verified.
 
 ## Status
 
