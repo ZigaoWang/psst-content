@@ -143,3 +143,17 @@ def test_rejected_photos_are_retired(scratch, place, tmp_path, monkeypatch):
     row = scratch.execute("SELECT state, retire_reason FROM images WHERE id = %s", (image_id,)).fetchone()
     assert row["state"] == "retired" and "next door" in row["retire_reason"]
     assert image_id not in export.build(scratch, tmp_path / "c", include_images=[image_id]).images
+
+
+def test_owner_photos_are_credited_to_the_owner(scratch, place, tmp_path, monkeypatch):
+    monkeypatch.setattr(images, "upload", lambda host, files: None)
+    path = tmp_path / "mine.jpg"
+    path.write_bytes(_photo(1200, 900))
+    run = runs.require(scratch, runs.start(scratch, "manual", None))
+    image_id = images.add_owner_photo(scratch, "host", run, place, path, "Zigao Wang", "https://www.zigao.wang/",
+                                      "The side door of the building, painted green, on a quiet morning.",
+                                      [0.5, 0.5], "photo", None)
+    row = scratch.execute("SELECT * FROM images WHERE id = %s", (image_id,)).fetchone()
+    assert row["source"] == "owner" and row["author"] == "Zigao Wang" and row["state"] == "draft"
+    assert row["source_url"] == "https://www.zigao.wang/" and row["license"] == images.OWNER_LICENSE
+    assert (row["full_width"], row["full_height"]) == (1200, 900)
