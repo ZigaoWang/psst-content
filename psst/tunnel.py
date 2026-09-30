@@ -1,5 +1,6 @@
 """The database over HTTPS, for machines that can't use SSH (Claude Code cloud sessions, whose only way
-out is a web proxy).
+out is a web proxy). The same service also fetches source pages for them at /tunnel/fetch: the Internet
+Archive rate-limits cloud machines, which share their addresses with many others, but not our server.
 
 The server side runs on the VPS behind nginx at /tunnel: it accepts a WebSocket carrying a secret token
 and relays its bytes to Postgres on 127.0.0.1:5432. The client side listens on a local port and relays
@@ -10,11 +11,18 @@ Postgres still checks its own login (the limited `psst_agent` role), and TLS pro
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import hmac
+import ipaddress
+import json
 import logging
 import socket
 import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
@@ -60,13 +68,56 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+FETCH_SLOTS = 2              # pages fetched at once, so the archive never sees a burst from us
+FETCH_CACHE_SECONDS = 6 * 3600
+_cache: dict[tuple[str, bool], tuple[float, dict]] = {}
+
+
+def _public(url: str) -> bool:
+    """Only public web addresses: never the server itself or its private network."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        addresses = {info[4][0] for info in socket.getaddrinfo(parts.hostname, parts.port or 443)}
+    except OSError:
+        return True  # unresolvable: the fetch fails on its own and says so
+    return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
+
+
+def _fetch_page(url: str, archive: bool) -> dict:
+    from . import fetch
+    key = (url, archive)
+    cached = _cache.get(key)
+    if cached and time.time() - cached[0] < FETCH_CACHE_SECONDS:
+        return cached[1]
+    page = dataclasses.asdict(fetch.read(url, archive))
+    if page["text"] and not page["text"].startswith("("):
+        _cache[key] = (time.time(), page)
+        if len(_cache) > 1000:
+            for old in sorted(_cache, key=lambda k: _cache[k][0])[:200]:
+                _cache.pop(old, None)
+    return page
+
+
 async def serve_forever(port: int, token_sha256: str) -> None:
     slots = asyncio.Semaphore(MAX_CONNECTIONS)
+    fetch_slots = asyncio.Semaphore(FETCH_SLOTS)
 
-    def check(connection, request):
+    async def check(connection, request):
         given = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         if not given or not hmac.compare_digest(token_hash(given), token_sha256):
             return connection.respond(401, "Unauthorized\n")
+        if request.path.startswith("/fetch"):
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.path).query)
+            url = (query.get("url") or [""])[0]
+            if not _public(url):
+                return connection.respond(400, "Only public http and https addresses\n")
+            async with fetch_slots:
+                page = await asyncio.to_thread(_fetch_page, url, (query.get("archive") or ["0"])[0] == "1")
+            response = connection.respond(200, json.dumps(page, ensure_ascii=False))
+            response.headers["Content-Type"] = "application/json; charset=utf-8"
+            return response
         if slots.locked():
             return connection.respond(503, "Too many connections\n")
         return None
@@ -113,6 +164,29 @@ def open_local(url: str, token: str) -> int:
             raise RuntimeError("The database tunnel didn't start")
         _client_port = port
         return port
+
+
+def remote_read(tunnel_url: str, token: str, url: str, archive: bool = False):
+    """Read a page through the server's fetcher (see the module docstring). Returns a fetch.Page."""
+    from . import fetch
+    base = tunnel_url.replace("wss://", "https://", 1).replace("ws://", "http://", 1).rstrip("/")
+    query = urllib.parse.urlencode({"url": url, "archive": "1" if archive else "0"})
+    request = urllib.request.Request(f"{base}/fetch?{query}", headers={
+        "Authorization": f"Bearer {token}", "User-Agent": "PsstContent/1.0"})
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=240) as response:
+                data = json.loads(response.read())
+            data["links"] = [tuple(link) for link in data.get("links", [])]
+            return fetch.Page(**data)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (400, 401):
+                raise RuntimeError(f"The server's fetcher refused {url}: {exc.read().decode().strip()}") from None
+            error = exc
+        except (OSError, json.JSONDecodeError) as exc:
+            error = exc
+        time.sleep(5 * (attempt + 1))
+    return fetch.Page(url, 0, "", f"(Couldn't read this page through the server: {error}.)")
 
 
 def check(url: str, token: str) -> None:

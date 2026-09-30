@@ -621,7 +621,14 @@ def sources_check(args) -> int:
              help="the run reading it; reviews must read every source this way before approving"))
 def fetch_command(args) -> int:
     from . import fetch, rules
-    page = fetch.read(args.url, args.archive)
+    settings = db._settings()
+    if settings.get("PSST_TUNNEL_URL"):
+        # Cloud machines are rate-limited by the Internet Archive; the server reads pages for them.
+        from . import tunnel
+        page = tunnel.remote_read(settings["PSST_TUNNEL_URL"], settings.get("PSST_TUNNEL_TOKEN", ""), args.url,
+                                  args.archive)
+    else:
+        page = fetch.read(args.url, args.archive)
     print(fetch.render(page, args.max, args.links, args.find))
     ok = bool(page.text) and not page.text.startswith(("(Couldn't", "(The archived copy", "(This PDF"))
     if args.run:
