@@ -317,9 +317,11 @@ def upload(host: str, files: list[Rendition]) -> None:
         for f in files:
             (Path(scratch) / f.name).write_bytes(f.data)
         subprocess.run(["ssh", host, f"mkdir -p {REMOTE_DIR}"], check=True)
-        # Readable by the web server whatever the local folder's permissions and owner were.
-        subprocess.run(["rsync", "-rt", "--ignore-existing", "--no-owner", "--no-group", "--chmod=D755,F644",
-                        f"{scratch}/", f"{host}:{REMOTE_DIR}/"], check=True)
+        subprocess.run(["rsync", "-rt", "--ignore-existing", "--no-owner", "--no-group", f"{scratch}/",
+                        f"{host}:{REMOTE_DIR}/"], check=True)
+    # Readable by the web server whatever the local permissions were. (macOS's rsync has no --chmod.)
+    subprocess.run(["ssh", host, f"chmod 755 {REMOTE_DIR} && chmod 644 " + " ".join(f"{REMOTE_DIR}/{f.name}" for f in files)],
+                   check=True)
 
 
 # Drafts -------------------------------------------------------------------------------------------------

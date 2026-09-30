@@ -169,5 +169,7 @@ def write(conn, directory: Path) -> Path:
 
 
 def upload(host: str, directory: Path) -> None:
-    subprocess.run(["rsync", "-rt", "--no-owner", "--no-group", "--chmod=D755,F644", "--delay-updates",
-                    f"{directory}/", f"{host}:{REMOTE_DIR}/"], check=True)
+    subprocess.run(["rsync", "-rt", "--no-owner", "--no-group", "--delay-updates", f"{directory}/",
+                    f"{host}:{REMOTE_DIR}/"], check=True)
+    # macOS's rsync has no --chmod, so set what the web server needs afterwards.
+    subprocess.run(["ssh", host, f"chmod 755 {REMOTE_DIR} && chmod 644 {REMOTE_DIR}/*"], check=True)
