@@ -78,7 +78,10 @@ def build(conn) -> dict:
                count(*) AS cells,
                count(*) FILTER (WHERE rc.state = 'done') AS done,
                count(*) FILTER (WHERE rc.state = 'open' AND rc.passes > 0) AS partial,
-               count(*) FILTER (WHERE rc.state = 'open' AND rc.passes = 0) AS untouched,
+               count(*) FILTER (WHERE rc.state = 'open' AND rc.passes = 0 AND NOT EXISTS (
+                   SELECT 1 FROM places p WHERE p.h3_cell = rc.cell AND p.state = 'active')) AS untouched,
+               count(*) FILTER (WHERE rc.state = 'open' AND rc.passes = 0 AND EXISTS (
+                   SELECT 1 FROM places p WHERE p.h3_cell = rc.cell AND p.state = 'active')) AS old_only,
                count(*) FILTER (WHERE rc.state IN ('claimed', 'drafted', 'reviewed')) AS in_progress,
                (SELECT count(*) FROM research_leads l JOIN research_cells c2 ON c2.cell = l.cell
                 WHERE c2.city_id = rc.city_id AND l.status = 'open') AS open_leads
@@ -130,7 +133,7 @@ def build(conn) -> dict:
     researched = {c["city"] for c in cities}
     for name, totals in sorted(city_totals.items(), key=lambda kv: -kv[1]["live_places"]):
         if name not in researched and totals["live_places"]:
-            cities.append({"city": name, "cells": 0, "done": 0, "partial": 0, "untouched": 0, "in_progress": 0,
+            cities.append({"city": name, "cells": 0, "done": 0, "partial": 0, "untouched": 0, "old_only": 0, "in_progress": 0,
                            "open_leads": 0, **totals})
 
     live_places = [p for p in places if p["published"]]

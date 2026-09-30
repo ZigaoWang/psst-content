@@ -165,18 +165,25 @@ function renderOverview() {
   </div>
 
   <h2>Cities</h2>
+  <p class="small muted">Research cells are hexagons of about 5 km². <b>Done</b> and <b>Partly</b> count cells swept for every
+    place worth a story. <b>Old content only</b> cells have places from the original content files but have never been
+    swept, so they're accurate but thin: <code>seed &lt;city&gt;</code> fills them in. <b>Verified</b> is the share of live
+    stories checked against their sources.</p>
   <table>
-    <tr><th>City</th><th>Research cells</th><th class="num">Done</th><th class="num">Partly</th><th class="num">Not yet</th>
+    <tr><th>City</th><th>Research cells</th><th class="num" title="Every lead handled">Done</th>
+        <th class="num" title="Researched, with leads left for another pass">Partly</th>
+        <th class="num" title="Never researched cell by cell, but has places from the old content files">Old content only</th>
+        <th class="num" title="Never researched and nothing there yet">Empty</th>
         <th class="num">Leads left</th><th class="num">Live places</th><th class="num">Stories</th><th class="num">Waiting</th>
         <th class="num">With photo</th><th class="num">Verified</th></tr>
     ${D.cities.map(c => {
       const seg = (n, color) => n ? `<span style="width:${100 * n / c.cells}%;background:${color}"></span>` : "";
       return `<tr class="click" onclick="location.hash='places';setTimeout(()=>{document.getElementById('f-city').value=${esc(JSON.stringify(c.city))};filterPlaces()})">
         <td><b>${esc(c.city)}</b></td>
-        <td>${c.cells ? `<div class="bar" title="${c.done} done, ${c.partial} partly, ${c.in_progress} in progress, ${c.untouched} not yet">
-              ${seg(c.done, STATE_COLORS.done)}${seg(c.partial, STATE_COLORS.partial)}${seg(c.in_progress, STATE_COLORS.in_progress)}</div>
-              <span class="small muted">${pct(c.done + c.partial, c.cells)} touched of ${fmt(c.cells)}</span>` : `<span class="muted small">outside research cities</span>`}</td>
-        <td class="num">${fmt(c.done)}</td><td class="num">${fmt(c.partial)}</td><td class="num">${fmt(c.untouched)}</td>
+        <td>${c.cells ? `<div class="bar" title="${c.done} done, ${c.partial} partly, ${c.in_progress} in progress, ${c.old_only} old content only, ${c.untouched} empty">
+              ${seg(c.done, STATE_COLORS.done)}${seg(c.partial, STATE_COLORS.partial)}${seg(c.in_progress, STATE_COLORS.in_progress)}${seg(c.old_only, "#c9b27c")}</div>
+              <span class="small muted">${pct(c.done + c.partial, c.cells)} researched of ${fmt(c.cells)}</span>` : `<span class="muted small">outside research cities</span>`}</td>
+        <td class="num">${fmt(c.done)}</td><td class="num">${fmt(c.partial)}</td><td class="num">${fmt(c.old_only)}</td><td class="num">${fmt(c.untouched)}</td>
         <td class="num">${fmt(c.open_leads)}</td><td class="num">${fmt(c.live_places)}</td><td class="num">${fmt(c.published)}</td>
         <td class="num">${fmt(c.drafts)}</td><td class="num">${pct(c.with_photos, c.live_places)}</td>
         <td class="num">${pct(c.verified, c.published)}</td></tr>`;
