@@ -32,6 +32,7 @@ class Page:
     via_archive: bool = False
     archived_at: str | None = None
     links: list[tuple[str, str]] = field(default_factory=list)  # (text, absolute URL), in page order
+    note: str | None = None
 
 
 class _Text(HTMLParser):
@@ -158,11 +159,30 @@ def _pdf(url: str, status: int, body: bytes, **extra) -> Page:
     return Page(url, status, title, text, **extra)
 
 
+HISTORIC_ENGLAND = re.compile(r"historicengland\.org\.uk/listing/the-list/list-entry/(\d+)", re.I)
+
+
 def read(url: str, archive: bool = False) -> Page:
-    """Read a page. With `archive`, go straight to the Internet Archive."""
+    """Read a page. With `archive`, go straight to the Internet Archive. A Historic England listing whose
+    text doesn't come through (it's loaded by script) is read from British Listed Buildings, which
+    republishes the same official list entry."""
+    page = _read(url, archive)
+    entry = HISTORIC_ENGLAND.search(url)
+    # Every listing's own text includes its grid reference ("Listing NGR"); a page without it is only the
+    # site's frame, with the listing still to be loaded by script.
+    if entry and "listing ngr" not in page.text.lower():
+        mirror = _read(f"https://britishlistedbuildings.co.uk/10{entry.group(1)}", False)
+        if len(mirror.text) > len(page.text):
+            mirror.note = ("Historic England's page didn't include the listing text, so this is the same list "
+                           "entry from British Listed Buildings. Cite the Historic England URL.")
+            return mirror
+    return page
+
+
+def _read(url: str, archive: bool = False) -> Page:
     if not archive and url.startswith("http://"):
         # Most sites now answer on https, which is also the only kind of source URL allowed.
-        secure = read("https://" + url[len("http://"):])
+        secure = _read("https://" + url[len("http://"):])
         if secure.text and not secure.text.startswith("(Couldn't"):
             return secure
     if not archive:
@@ -189,6 +209,8 @@ def render(page: Page, limit: int, links: bool = False) -> str:
     head = [f"URL: {page.url}"]
     if page.via_archive:
         head.append(f"Read from the Internet Archive copy of {page.archived_at}; the live page refused or failed.")
+    if page.note:
+        head.append(page.note)
     if page.title:
         head.append(f"Title: {page.title}")
     text = page.text if len(page.text) <= limit else page.text[:limit] + f"\n\n[... {len(page.text) - limit} more characters; use --max]"
