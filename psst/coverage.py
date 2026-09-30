@@ -11,9 +11,11 @@ import h3
 
 REMOTE_DIR = "/www/wwwroot/psst/public/coverage"
 
-COLORS = {"open": "#9e9e9e", "claimed": "#f2a900", "drafted": "#0067b1", "reviewed": "#7a1f5c", "done": "#00783a"}
-LABELS = {"open": "Open for research", "claimed": "Being researched now", "drafted": "Researched, waiting for review",
-          "reviewed": "Reviewed, waiting to be published", "done": "Finished and published"}
+COLORS = {"open": "#9e9e9e", "partial": "#7fb77e", "claimed": "#f2a900", "drafted": "#0067b1", "reviewed": "#7a1f5c",
+          "done": "#00783a"}
+LABELS = {"open": "Not researched yet", "partial": "Partly researched, more to do", "claimed": "Being researched now",
+          "drafted": "Researched, waiting for review", "reviewed": "Reviewed, waiting to be published",
+          "done": "Fully researched"}
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -125,6 +127,9 @@ def build(conn) -> str:
     features = []
     cities: dict[str, dict] = {}
     for r in rows:
+        # A cell that has had a pass but still has leads left is open again; show it as partly done.
+        if r["state"] == "open" and r["passes"]:
+            r = {**r, "state": "partial"}
         state_totals[r["state"]] += 1
         lats, lngs = zip(*h3.cell_to_boundary(r["cell"]))
         c = cities.setdefault(r["city"] or "Other", {"name": r["city"] or "Other", "cells": 0, "south": 90, "west": 180,

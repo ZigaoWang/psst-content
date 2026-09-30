@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 from . import db
@@ -844,6 +845,12 @@ def publish_command(args) -> int:
                             WHERE p.h3_cell = rc.cell AND f.state IN ('draft', 'reviewed'))""")
         runs.finish(conn, run)
     print(f"Promoted {manifest['contentVersion']} to production.")
+    try:
+        from . import coverage
+        with db.connect() as conn:
+            coverage.upload(config["host"], coverage.write(coverage.build(conn), ROOT / "export" / "coverage" / "index.html"))
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+        print(f"(The coverage map wasn't refreshed: {exc}. Run psst coverage.)")
     return 0
 
 
