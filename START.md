@@ -6,6 +6,7 @@ The person running you will say what to do in a few words, for example:
 - `seed hong kong, 5 cells`
 - `seed shanghai around the bund, keep going until the Bund is done`
 - `seed london deeper` (more passes on the partly done cells with the most left, instead of new cells)
+- `photos london` (or `photos london, 20 places`)
 - `review`
 - `check the old content`
 - `status`
@@ -35,8 +36,18 @@ Default: everything waiting.
 
 1. Start a review run: `uv run psst run start --kind review --model <your model id> --notes "Review"`, and pass the id it prints as `--run <id>` to every command that takes one.
 2. Repeat until it returns no facts: `uv run psst review next --out work/review.json`, then review each fact as the guide says (section 12): open every source with `uv run psst fetch <url> --run <run id>` (approving is refused otherwise), check every claim against what the source says, and approve, edit, or reject with notes naming each source you checked. Write `work/decisions.json`, run `uv run psst review apply work/decisions.json --dry-run`, fix anything it reports, then apply.
-3. Publish only once every fact in the batch has been checked this way: `uv run psst publish`. Publishing first and fixing later puts mistakes in front of readers. If the staging check fails, report what it said; don't work around it.
-4. `uv run psst run finish <run id>`, and report how many facts were approved, edited, and rejected, and what kinds of problems you found.
+3. If photos are waiting (`uv run psst images next --out work/images/review.json --run <run id>` lists them), review them too, as the guide says (section 13): look at every one with `uv run psst images show <id> --run <run id>` before deciding.
+4. Publish only once every fact and photo in the batch has been checked this way: `uv run psst publish`. Publishing first and fixing later puts mistakes in front of readers. If the staging check fails, report what it said; don't work around it.
+5. `uv run psst run finish <run id>`, and report how many facts and photos were approved, edited, and rejected, and what kinds of problems you found.
+
+## Add photos
+
+Default: 10 places, in the city named. The rules are in the guide, section 13.
+
+1. Start a research run, as above.
+2. `uv run psst images find --city "<City>" --limit <n>` (or `--place <id>` for one place). It picks places with published stories and no photo, the ones with the most stories first.
+3. For each place, read `work/images/<place id>/candidates.md` and open the previews you consider. Pick the best one or two that clearly show the place, or none if nothing does. Write `work/images/draft.json`, run `uv run psst images check work/images/draft.json`, fix what it reports, then `uv run psst images submit work/images/draft.json --run <run id>`.
+4. Finish the run, and report how many places got photos and how many had nothing usable.
 
 ## Check the old content
 

@@ -16,9 +16,10 @@ This is the handbook for researching, reviewing, and publishing Psst's places an
 10. Tags
 11. The draft format
 12. Reviewing
-13. Publishing
-14. Fixing published content
-15. Regional notes
+13. Photos
+14. Publishing
+15. Fixing published content
+16. Regional notes
 
 ## 1. What Psst is for
 
@@ -53,7 +54,7 @@ The jobs:
 
 - **Researcher:** claims a cell, researches it, and submits a draft (sections 5 to 11).
 - **Reviewer:** a different run, skeptical by default, that approves, edits, or rejects each draft fact and handles problem reports (section 12).
-- **Publisher:** runs `psst publish`, which stages everything, checks it, and only then goes live (section 13).
+- **Publisher:** runs `psst publish`, which stages everything, checks it, and only then goes live (section 14).
 
 Review always happens in a separate session from the research. A run can never review its own research. Any model can review, as long as it follows this guide.
 
@@ -448,7 +449,106 @@ uv run psst review next --verify --city "Kuala Lumpur" --out work/review.json
 
 `--verify` picks published facts nobody has checked since the migration. Add `--sample` for a random selection: reviewing 60 or so sampled facts per city estimates how accurate that city's content is, for far fewer tokens than checking every fact, and tells you whether a full pass is worth it. Review them exactly as above. Approving marks a fact verified; an edit changes it at the next publish; a rejection takes it down at the next publish. Publish after each batch of decisions.
 
-## 13. Publishing
+## 13. Photos
+
+A photo helps a reader find the place and see what the story is about. A place without a reviewed photo shows the map and Look Around instead, which is fine: no photo is better than a wrong or misleading one.
+
+### What's allowed
+
+- **Free licenses only:** public domain, CC0, CC BY, and CC BY-SA. Never NC (non-commercial) or ND (no derivatives), never Wikipedia's non-free or "fair use" files, never photos from news sites, tourism sites, or anywhere else without a free license.
+- **No AI-generated or AI-upscaled images**, and nothing retouched to change what's there.
+- **The photo shows this place.** Not the street next to it, not a similar building elsewhere, not the inside when the story is about the front, unless the story is about the inside.
+- **Up to 6 per place.** Usually one or two good ones are enough.
+- **Historic photos** (kind `historic`) show the place as it was, with the year it was taken. They're kept separate from current photos, so the app can show "then and now" later. The year is the one the source gives; if it's only approximate, say "about" in the alt text and use the source's best year.
+
+### Where photos come from
+
+`psst images find` searches, in this order, and keeps only files whose own license metadata is free:
+
+1. The place's Wikidata image (P18), then its Commons category (P373).
+2. Commons photos taken within 60 m (these include millions of Geograph photos at full size and archive scans).
+3. Geograph, in Britain and Ireland (every photo is CC BY-SA 2.0).
+4. Flickr, when `PSST_FLICKR_KEY` is set in the env file: CC BY, CC BY-SA, CC0, public domain, and Flickr Commons (archives and libraries sharing their collections, "no known copyright restrictions").
+
+**Attribution is never typed by hand.** You choose a candidate by its key; the author, license, and source come from the source's own metadata. We host our own resized copies (a 1,920 px full size and a 640 px thumbnail, with all camera and location metadata removed), and every photo in the app shows its credit and opens its source.
+
+### Adding photos
+
+```
+uv run psst images find --city London --limit 10      # places with stories and no photo, most stories first
+uv run psst images find --place pl_...                  # one place
+```
+
+Each place gets `work/images/<place id>/candidates.md`, listing up to 24 candidates with their author, license, year, size, and how they were found, and a small preview file for each. **Open every preview you consider and look at it.** The title and the category aren't enough: Commons categories are often wrong, and "taken within 60 m" can mean the building across the road.
+
+Pick the best one or two per place and write `work/images/draft.json`:
+
+```json
+[
+  {
+    "place": "pl_1xvvq63jbt",
+    "key": "commons:File:Coal Drops Yard 0550.jpg",
+    "alt": "The two curved slate roofs of Coal Drops Yard meeting above a paved courtyard, with gasholder frames behind.",
+    "focus": [0.5, 0.4]
+  },
+  {
+    "place": "pl_...",
+    "key": "commons:File:....jpg",
+    "alt": "...",
+    "kind": "historic",
+    "year": 1905
+  }
+]
+```
+
+- **`key`:** copied exactly from `candidates.md`.
+- **`alt`:** what the photo shows, for VoiceOver, in 10 to 300 characters. Describe what a sighted reader would notice: the building, what it's made of, what's around it. Don't start with "Photo of" (VoiceOver already says it's an image), don't repeat the story, and follow the writing rules in section 7.
+- **`focus`:** `[x, y]` from 0 to 1, where `[0, 0]` is the top left. It's the point the app keeps in view when it crops the photo to a card or a header, usually the subject's middle. Leave it out for `[0.5, 0.5]`.
+- **`kind`:** `photo` (the default) or `historic`. A historic photo needs `year`; if you leave it out, the year Commons records is used.
+- **Choosing:** prefer a clear, level, daytime photo where the place fills the frame and nothing blocks it. A photo from the Wikidata image is usually good but not always the best. Avoid photos where people's faces are the subject, photos with watermarks or frames, and blurry or tiny ones.
+
+Then:
+
+```
+uv run psst images check work/images/draft.json
+uv run psst images submit work/images/draft.json --run <run id>     # a research run
+```
+
+Submitting downloads the photo, makes our copies, uploads them, and stores the photo as a draft for review.
+
+**Your own photos:** `uv run psst images upload photo.jpg --place pl_... --alt "..." [--focus 0.5,0.4] [--historic 1998]`. It's credited to the owner (Zigao Wang, linking to www.zigao.wang; `PSST_OWNER_NAME` and `PSST_OWNER_URL` change this) and goes through review like any other photo.
+
+### Reviewing photos
+
+In a review run:
+
+```
+uv run psst images next --out work/images/review.json --run <run id>
+uv run psst images show <image id> --run <run id>      # downloads the copy readers will see; open it and look
+```
+
+For each photo, check:
+
+- **It's the right place.** Compare it with the place's name, kind, and stories (in the review file), its Wikidata item, and other photos of it. Street layout, signs, and the shape of the building usually settle it. When you can't tell, reject.
+- **It isn't misleading.** A photo of the place before a fire, a rebuild, or a demolition is historic, not current. A photo of scaffolding or a building site is only right if that's what's there now.
+- **The alt text is accurate** and follows the rules above, and the focus point sits on the subject.
+- **The license and credit look right.** Open the source page (`source_url`) if anything is doubtful: a "own work" that is plainly a scan of an old postcard, or a license that doesn't match what the page says. Reject when in doubt.
+
+Write `work/images/decisions.json`:
+
+```json
+{
+  "im_1a2b3c4d5e": {"decision": "approve", "notes": "The curved roofs and gasholders match the Wikidata image and the stories."},
+  "im_6f7g8h9j0k": {"decision": "edit", "notes": "Moved the focus onto the doorway.", "focus": [0.4, 0.6], "alt": "..."},
+  "im_mnpqrstvwx": {"decision": "reject", "notes": "Shows the building next door; the chapel is the brick one on the left."}
+}
+```
+
+`edit` can change `alt`, `focus`, `kind`, `year`, and `position` (0 shows first). Notes are required. Approving or editing a photo this run never opened with `psst images show` is refused. Then `uv run psst images apply work/images/decisions.json --dry-run --run <run id>`, fix anything it reports, and apply. The next `psst publish` puts approved photos in the app.
+
+**Fixing a published photo:** `uv run psst images flag <id> --reason "..."` sends it back to review (it stays up until then). `uv run psst images retire <id> --reason "..."` takes it down at the next publish, for example when a license turns out to be wrong.
+
+## 14. Publishing
 
 ```
 uv run psst publish
@@ -456,9 +556,9 @@ uv run psst publish
 
 This one command:
 
-1. Exports everything published, plus every reviewed fact, into content format 2 (a manifest and one pack per city; `format/v2/`). The export is deterministic: the same database always gives byte-identical files.
+1. Exports everything published, plus every reviewed fact and photo, into content format 2 (a manifest and one pack per city; `format/v2/`). The export is deterministic: the same database always gives byte-identical files.
 2. Re-checks every exported fact against the writing rules and every pack against its schema.
-3. Uploads to **staging** and downloads it back exactly as the app would, checking every hash, every reference (places to areas, facts to tags), every old place id, and that the number of places and facts hasn't dropped by more than 2 percent.
+3. Uploads to **staging** and downloads it back exactly as the app would, checking every hash, every reference (places to areas, facts to tags), that every new photo file is served, every old place id, and that the number of places and facts hasn't dropped by more than 2 percent.
 4. Only if all of that passes, promotes staging to **production** by switching one file atomically. Reviewed facts become `published`, and finished cells become `done`.
 
 If any check fails, production is untouched and the problems are listed. Apps keep the last good version they have, and they never switch to a download that doesn't check out.
@@ -470,7 +570,7 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 - `uv run psst bundle` copies what production serves into the app repository (`../psst-map/Content/v2`) as the snapshot the app ships with. Do it before an app release, then rebuild the app.
 - `uv run psst coverage` rebuilds the coverage map at `/coverage/` on the Psst site (user `psst`; the password is in `/www/wwwroot/psst/coverage.password` on the server). It shows every cell by state, with place and fact counts, and a heat layer of the empty areas app users looked at most.
 
-## 14. Fixing published content
+## 15. Fixing published content
 
 - **Something is wrong in a published fact:** `uv run psst review flag <fact id> --reason "..."`. It stays live until a review run approves, edits, or rejects it (section 12). Readers' problem reports from the app do the same automatically.
 - **Dead links:** every Saturday the server checks every cited link (`psst sources check`). A source that fails two weeks in a row flags its facts for review. Sites that refuse scripts are recorded as blocked and never flag anything.
@@ -478,7 +578,7 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 - **A place is gone or nothing about it holds up:** reject all its facts in review. A place with no published facts disappears from the app, but its id is never reused, so saved places don't break.
 - **Never edit the database by hand.** Every change goes through a command, so it's attributed to a run and kept in the history.
 
-## 15. Regional notes
+## 16. Regional notes
 
 ### Mainland China
 
@@ -494,5 +594,6 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 
 ### Being a good API citizen
 
-- Requests carry a plain User-Agent, `PsstContent/1.0`. Never put an email address or other personal information in a request.
+- Requests carry a plain User-Agent, `PsstContent/1.0`, with the Psst site's address added for Wikimedia, as its policy asks. Never put an email address or other personal information in a request.
+- Photo searches ask Commons to refuse them when its servers are busy (`maxlag`), and wait between batches.
 - Wikidata, Wikipedia, and Overpass are shared services. The tools retry and fall back on their own (the Wikidata query service when the API refuses, the main OSM API when Overpass is busy). Don't run more than a few researchers at once.
