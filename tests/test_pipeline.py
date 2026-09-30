@@ -129,7 +129,7 @@ def test_review_then_export(scratch, cell, tag_id, tmp_path):
     assert fact_id in [r["id"] for r in queue]
     assert fact_id not in [r["id"] for r in review.queue(scratch, 500, cell=cell, reviewer_run=researcher["id"])]
 
-    decision = {"fact": fact_id, "decision": "edit", "notes": "Checked the date and the plaque against the source.",
+    decision = {"fact": fact_id, "decision": "edit", "notes": "Checked the date and the plaque against the Example Society page.",
                 "changes": {"headline": "The bench looks at a car park on purpose"}}
     assert any("own research" in e for e in review.check(scratch, [decision], researcher).errors)
     reviewer = start(scratch, "review", "test-reviewer")
@@ -217,7 +217,14 @@ def test_claim_goes_where_people_looked(scratch):
     assert top["cell"] == area and top["views"] == 1000 and top["plannedCells"] > 0
 
 
+def unverify_some(scratch, n=200) -> None:
+    """Some migrated facts waiting for verification, whatever the real database's progress (rolled back)."""
+    scratch.execute("""UPDATE facts SET last_verified_at = NULL WHERE id IN (
+                           SELECT id FROM facts WHERE state = 'published' AND legacy_id IS NOT NULL ORDER BY id LIMIT %s)""", (n,))
+
+
 def test_migrated_facts_can_be_verified(scratch):
+    unverify_some(scratch)
     fact = scratch.execute("""SELECT f.id, ci.name AS city FROM facts f JOIN places p ON p.id = f.place_id
                               JOIN admin_areas ci ON ci.id = p.city_id
                               WHERE f.state = 'published' AND f.last_verified_at IS NULL LIMIT 1""").fetchone()
@@ -225,7 +232,9 @@ def test_migrated_facts_can_be_verified(scratch):
     read_sources(scratch, reviewer["id"], fact["id"])
     assert fact["id"] in [r["id"] for r in review.queue(scratch, 5000, reviewer_run=reviewer["id"], city=fact["city"],
                                                          verify=True)]
-    decision = {"fact": fact["id"], "decision": "approve", "notes": "Opened both sources; every detail matches."}
+    publisher = scratch.execute("""SELECT s.publisher FROM fact_sources fs JOIN sources s ON s.id = fs.source_id
+                                   WHERE fs.fact_id = %s ORDER BY fs.position LIMIT 1""", (fact["id"],)).fetchone()["publisher"]
+    decision = {"fact": fact["id"], "decision": "approve", "notes": f"{publisher} confirms every detail."}
     assert review.check(scratch, [decision], reviewer).ok
     review.apply(scratch, [decision], reviewer)
     row = scratch.execute("SELECT state, last_verified_at, reviewed_by FROM facts WHERE id = %s", (fact["id"],)).fetchone()
@@ -242,6 +251,7 @@ def test_local_names_must_be_in_the_countrys_language(scratch):
 
 
 def test_samples_are_random(scratch):
+    unverify_some(scratch)
     reviewer = start(scratch, "review", "some-other-model")
     first = [r["id"] for r in review.queue(scratch, 30, reviewer_run=reviewer["id"], verify=True, sample=True)]
     second = [r["id"] for r in review.queue(scratch, 30, reviewer_run=reviewer["id"], verify=True, sample=True)]
@@ -334,3 +344,30 @@ def test_deeper_picks_the_partly_done_cell_with_most_left(scratch):
     research.store_leads(scratch, rich, [{"key": f"Q{n}", "name": f"B{n}", "known": False} for n in range(2, 6)],
                          researcher["id"])
     assert research.claim(scratch, researcher["id"], deeper=True)["cell"] == rich
+
+
+def test_boilerplate_review_notes_are_refused(scratch, cell, tag_id):
+    _, counts = submit(scratch, cell, tag_id)
+    fact_id = scratch.execute("SELECT id FROM facts WHERE place_id = %s", (counts["new_place_ids"][0],)).fetchone()["id"]
+    reviewer = start(scratch, "review", "test-reviewer")
+    read_sources(scratch, reviewer["id"], fact_id)
+    generic = {"fact": fact_id, "decision": "approve", "notes": "Opened every cited source; all claims hold."}
+    assert any("name the source" in e for e in review.check(scratch, [generic], reviewer).errors)
+    specific = {**generic, "notes": "The Example Society page gives the same date and the plaque's wording."}
+    assert review.check(scratch, [specific], reviewer).ok
+    others = scratch.execute("SELECT id FROM facts WHERE state = 'draft' AND id <> %s LIMIT 3", (fact_id,)).fetchall()
+    repeated = [{**specific, "fact": r["id"]} for r in others] + [specific]
+    if len(repeated) > 2:
+        assert any("same notes" in e for e in review.check(scratch, repeated, reviewer).errors)
+
+
+def test_a_rubber_stamped_review_can_be_reopened(scratch, cell, tag_id):
+    _, counts = submit(scratch, cell, tag_id)
+    fact_id = scratch.execute("SELECT id FROM facts WHERE place_id = %s", (counts["new_place_ids"][0],)).fetchone()["id"]
+    reviewer = start(scratch, "review", "test-reviewer")
+    review.apply(scratch, [{"fact": fact_id, "decision": "approve", "notes": "Looked fine."}], reviewer)
+    assert scratch.execute("SELECT state FROM facts WHERE id = %s", (fact_id,)).fetchone()["state"] == "reviewed"
+    counts = review.reopen(scratch, reviewer["id"], "looked fine")
+    assert counts["back_to_review"] == 1
+    row = scratch.execute("SELECT state, review_run FROM facts WHERE id = %s", (fact_id,)).fetchone()
+    assert row["state"] == "draft" and row["review_run"] is None

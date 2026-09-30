@@ -695,6 +695,19 @@ def review_apply(args) -> int:
     return 0
 
 
+@command("review reopen", "Undo a review run's approvals that weren't real checks: drafts go back to review, "
+         "published facts count as unverified again.", arg("run", help="the review run"),
+         arg("--notes-like", help="only decisions whose notes contain this text (the run's boilerplate note)"),
+         arg("--reason", required=True))
+def review_reopen(args) -> int:
+    from . import review
+    with db.connect(actor="review", note=f"Review reopened: {args.reason}") as conn:
+        counts = review.reopen(conn, args.run, args.notes_like)
+    print(f"{counts['back_to_review']} drafts back in the review queue; {counts['unverified']} published facts "
+          "unverified again.")
+    return 0
+
+
 @command("review progress", "How much of each city's published content a skeptical review has verified.")
 def review_progress(args) -> int:
     from . import review

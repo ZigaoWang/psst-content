@@ -4,6 +4,9 @@ what was checked."""
 
 from __future__ import annotations
 
+import re
+import urllib.parse
+
 from . import rules, tags
 
 DECISIONS = ("approve", "edit", "reject")
@@ -64,6 +67,35 @@ def progress(conn) -> list[dict]:
         WHERE f.state = 'published' GROUP BY 1, 2 ORDER BY 1, 2""").fetchall()
 
 
+def names_a_source(notes: str, sources: list[dict]) -> bool:
+    """Whether review notes mention one of the fact's sources by publisher, site name, or a word of its title."""
+    text = notes.lower()
+    for source in sources:
+        host = re.sub(r"^www\.", "", urllib.parse.urlsplit(source.get("url") or "").hostname or "")
+        candidates = [source.get("publisher") or "", host, host.split(".")[0]]
+        candidates += [w for w in re.findall(r"[^\W\d_]{5,}", source.get("title") or "")]
+        if any(c and len(c) >= 3 and c.lower() in text for c in candidates):
+            return True
+    return False
+
+
+def reopen(conn, run_id: str, pattern: str | None) -> dict[str, int]:
+    """Undo a review run's approvals that weren't real checks. Approved drafts go back to the review queue;
+    published facts it marked verified count as unverified again. Its rejections and edits stay: each can be
+    reviewed again on its own."""
+    match = "AND review_notes ILIKE %s" if pattern else ""
+    params = (run_id, f"%{pattern}%") if pattern else (run_id,)
+    drafts = conn.execute(f"""UPDATE facts SET state = 'draft', reviewed_at = NULL, reviewed_by = NULL, review_run = NULL,
+                                  review_notes = NULL
+                              WHERE review_run = %s AND state = 'reviewed' {match} RETURNING id""", params).fetchall()
+    verified = conn.execute(f"""UPDATE facts SET last_verified_at = NULL, review_run = NULL
+                                WHERE review_run = %s AND state = 'published' {match} RETURNING id""", params).fetchall()
+    conn.execute("""UPDATE research_cells rc SET state = 'drafted' WHERE rc.state = 'reviewed' AND EXISTS (
+                        SELECT 1 FROM facts f JOIN places p ON p.id = f.place_id
+                        WHERE p.h3_cell = rc.cell AND f.state = 'draft')""")
+    return {"back_to_review": len(drafts), "unverified": len(verified)}
+
+
 def check(conn, decisions: list[dict], run: dict) -> rules.Report:
     report = rules.Report()
     if not isinstance(decisions, list):
@@ -79,6 +111,12 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
     known_tags = {r["id"] for r in conn.execute("SELECT id FROM tags")}
     read = {r["url_key"] for r in conn.execute("SELECT url_key FROM source_reads WHERE run_id = %s", (run["id"],))}
     seen = set()
+    # A real check leaves a note about that story. The same words on many decisions mean they weren't read.
+    note_counts: dict[str, int] = {}
+    for d in decisions:
+        if isinstance(d, dict) and d.get("notes"):
+            key = " ".join(str(d["notes"]).lower().split())
+            note_counts[key] = note_counts.get(key, 0) + 1
     for index, decision in enumerate(decisions):
         where = f"decisions[{index}]"
         if not isinstance(decision, dict):
@@ -98,6 +136,12 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
             report.error(where, f"is {fact['state']} and not flagged; nothing to review")
         if fact["research_run"] == run["id"]:
             report.error(where, "a run can't review its own research")
+        notes = str(decision.get("notes") or "")
+        if note_counts.get(" ".join(notes.lower().split()), 0) > 2:
+            report.error(where, "the same notes are on several decisions; say what you checked for this story "
+                                "(which source confirmed which claim)")
+        if decision.get("decision") in ("approve", "edit") and not names_a_source(notes, fact["source_list"]):
+            report.error(where, "notes must name the source that confirmed the story (its publisher, site, or title)")
         choice = decision.get("decision")
         if choice not in DECISIONS:
             report.error(where, f"decision must be one of {', '.join(DECISIONS)}")
