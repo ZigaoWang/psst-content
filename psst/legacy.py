@@ -185,8 +185,8 @@ STAGING = {
 }
 
 UPSERTS = [
-    """INSERT INTO pipeline_runs (id, kind, model, operator, notes)
-       SELECT id, kind, model, operator, notes FROM s_runs ON CONFLICT (id) DO NOTHING""",
+    """INSERT INTO pipeline_runs (id, kind, model, operator, notes, finished_at)
+       SELECT id, kind, model, operator, notes, now() FROM s_runs ON CONFLICT (id) DO NOTHING""",
     """INSERT INTO places (id, kind, size, geom, coord_source, coord_source_ref, coord_license, wikidata_id, osm_ref,
                            h3_cell, country_code, created_by_run)
        SELECT id, kind, size, ST_SetSRID(ST_MakePoint(lon, lat), 4326), coord_source, coord_source_ref, coord_license,
