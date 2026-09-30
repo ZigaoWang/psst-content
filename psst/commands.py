@@ -532,6 +532,23 @@ def research_claim(args) -> int:
     return 0
 
 
+@command("research fame", "Look up how well known each lead is (its number of Wikipedias), for leads that lack it.")
+def research_fame(args) -> int:
+    from . import research
+    with db.connect() as conn:
+        rows = conn.execute("SELECT DISTINCT wikidata FROM research_leads WHERE fame IS NULL AND wikidata LIKE 'Q%%'").fetchall()
+    qids = [r["wikidata"] for r in rows]
+    for start in range(0, len(qids), 500):
+        batch = qids[start:start + 500]
+        fames = research.fame_of(batch)
+        with db.connect() as conn:
+            for qid, fame in zip(batch, fames):
+                if fame is not None:
+                    conn.execute("UPDATE research_leads SET fame = %s WHERE wikidata = %s AND fame IS NULL", (fame, qid))
+        print(f"{min(start + 500, len(qids))} of {len(qids)}", flush=True)
+    return 0
+
+
 @command("research brief", "Write the brief for a cell again (for example after a failed sweep).",
          arg("cell"), arg("--no-sweep", action="store_true"))
 def research_brief(args) -> int:

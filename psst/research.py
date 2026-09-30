@@ -158,13 +158,15 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
             return (-demand.get(parent, 0), passes.get(c, 0), -existing.get(c, 0), round(distance, 1), c)
 
         if deeper:
-            # Depth first: the partly researched cell with the most leads nobody has looked at yet.
-            left = {r["cell"]: r["n"] for r in conn.execute(
-                "SELECT cell, count(*) AS n FROM research_leads WHERE status = 'open' GROUP BY cell")}
+            # Depth first: the partly researched cell with the most well-known places nobody has covered yet.
+            left = {r["cell"]: (r["famous"], r["n"]) for r in conn.execute(
+                "SELECT cell, count(*) FILTER (WHERE fame >= %s) AS famous, count(*) AS n FROM research_leads "
+                "WHERE status = 'open' GROUP BY cell", (WELL_KNOWN,))}
             candidates = [r["cell"] for r in open_cells if passes.get(r["cell"], 0) > 0 and left.get(r["cell"])]
             if not candidates:
                 raise RuntimeError("No partly researched cells with leads left" + (" in that city" if city_id else "")
                                    + "; claim without --deeper.")
+            # Well-known places left undone first, then simply the most leads left.
             cell = max(candidates, key=lambda c: (left[c], c))
         elif near:
             # The open cell closest to a spot the person asked for ("focus on the Bund").
@@ -224,9 +226,29 @@ def brief(conn, cell: str, sweep: bool = True) -> dict:
         candidates, problems = _sweep(cell, row["country_code"])
         for c in candidates:
             c["known"] = bool((c.get("wikidata") and c["wikidata"] in known_q) or (c.get("osm") and c["osm"] in known_osm))
-        result["candidates"] = sorted(candidates, key=lambda c: (c["known"], not c.get("wikipedia"), c["name"]))
+        for c, fame in zip(candidates, fame_of([c.get("wikidata") for c in candidates])):
+            c["fame"] = fame
+        # Best known first: a session that can't reach every lead should cover St Paul's before an office block.
+        result["candidates"] = sorted(candidates, key=lambda c: (c["known"], -(c.get("fame") or 0),
+                                                                 not c.get("wikipedia"), c["name"]))
         result["sweepProblems"] = problems
     return result
+
+
+WELL_KNOWN = 20  # Wikipedia editions; St Paul's has over 100, a listed office block one or none
+
+
+def fame_of(qids: list[str | None]) -> list[int | None]:
+    """How many Wikipedia language editions cover each item (its Wikidata sitelinks); None without an item."""
+    wanted = sorted({q for q in qids if q and q.startswith("Q")})
+    counts: dict[str, int] = {}
+    try:
+        for qid, entity in net.wikidata_entities(wanted, props="sitelinks").items():
+            counts[qid] = sum(1 for site in entity.get("sitelinks", {}) if site.endswith("wiki")
+                              and site not in ("commonswiki", "specieswiki", "metawiki", "wikidatawiki"))
+    except RuntimeError:
+        return [None] * len(qids)
+    return [counts.get(q) if q else None for q in qids]
 
 
 def _sweep(cell: str, country: str | None) -> tuple[list[dict], list[str]]:
@@ -296,20 +318,20 @@ def store_leads(conn, cell: str, candidates: list[dict], run_id: str) -> dict[st
     """Record a cell's leads. Leads from earlier passes keep what happened to them."""
     for c in candidates:
         conn.execute("""
-            INSERT INTO research_leads (cell, key, name, wikidata, osm, url, what, status, run_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO research_leads (cell, key, name, wikidata, osm, url, what, status, run_id, fame)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (cell, key) DO UPDATE SET name = EXCLUDED.name, wikidata = EXCLUDED.wikidata, osm = EXCLUDED.osm,
-                url = EXCLUDED.url, what = EXCLUDED.what,
+                url = EXCLUDED.url, what = EXCLUDED.what, fame = coalesce(EXCLUDED.fame, research_leads.fame),
                 status = CASE WHEN research_leads.status = 'open' THEN EXCLUDED.status ELSE research_leads.status END""",
                      (cell, c["key"], c["name"], c.get("wikidata"), c.get("osm"), c.get("wikipedia"), c.get("what"),
-                      "known" if c.get("known") else "open", run_id))
+                      "known" if c.get("known") else "open", run_id, c.get("fame")))
     return {r["status"]: r["n"] for r in conn.execute(
         "SELECT status, count(*) AS n FROM research_leads WHERE cell = %s GROUP BY status", (cell,))}
 
 
 def open_leads(conn, cell: str) -> list[dict]:
-    return conn.execute("SELECT * FROM research_leads WHERE cell = %s AND status = 'open' ORDER BY name",
-                        (cell,)).fetchall()
+    return conn.execute("SELECT * FROM research_leads WHERE cell = %s AND status = 'open' "
+                        "ORDER BY fame DESC NULLS LAST, name", (cell,)).fetchall()
 
 
 def account_for_leads(conn, draft: dict, positions: dict) -> tuple[dict[str, tuple[str, str | None]], list[dict]]:
@@ -369,7 +391,9 @@ def write_brief(data: dict, directory: Path) -> Path:
     lines += ["", "## Leads to account for", "",
               "Every lead marked TODO must end up in the draft: added as a place, or in `skipped` with a reason "
               "(one reason can cover several with `names`). `psst draft check` lists any that are left. Leads are "
-              "only a start: also look for places the sweep can't see (guide, section 5).", ""]
+              "only a start: also look for places the sweep can't see (guide, section 5). They're listed best known "
+              "first (the number is how many Wikipedias cover it): places marked WELL KNOWN are what readers expect "
+              "to find, so cover them in this pass before anything else.", ""]
     for c in data["candidates"]:
         refs = " ".join(x for x in (c.get("wikidata"), c.get("osm")) if x)
         if c["known"]:
@@ -379,7 +403,10 @@ def write_brief(data: dict, directory: Path) -> Path:
         else:
             flag = "(handled in an earlier pass)"
         extra = " ".join(x for x in (c.get("what"), c.get("wikipedia")) if x)
-        lines.append(f"- {flag} {c['name']} {refs} {extra}".rstrip())
+        fame = c.get("fame") or 0
+        if flag == "TODO" and fame >= WELL_KNOWN:
+            flag = "TODO, WELL KNOWN"
+        lines.append(f"- {flag} {c['name']}{f' [{fame}]' if fame else ''} {refs} {extra}".rstrip())
     if data["sweepProblems"]:
         lines += ["", "## Sweep problems", ""] + [f"- {p}" for p in data["sweepProblems"]]
     path = directory / "brief.md"
@@ -442,7 +469,13 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
         report.error("draft", f"headline used twice: {repeated!r}")
 
     if report.ok:
-        _, missing = account_for_leads(conn, draft, {})
+        covered, missing = account_for_leads(conn, draft, {})
+        famous_later = [lead for lead in open_leads(conn, draft["cell"])
+                        if (lead["fame"] or 0) >= WELL_KNOWN and covered.get(lead["key"], ("",))[0] == "later"]
+        if famous_later:
+            report.warn("leads", "well-known places left for later: "
+                        + ", ".join(f"{lead['name']} ({lead['fame']} Wikipedias)" for lead in famous_later[:15])
+                        + ". These are what readers expect to find; cover them in this pass if at all possible.")
         if missing:
             shown = ", ".join(f"{m['name']} ({m['wikidata'] or m['osm'] or m['key']})" for m in missing[:25])
             report.error("leads", f"{len(missing)} leads from the brief aren't accounted for: {shown}"
