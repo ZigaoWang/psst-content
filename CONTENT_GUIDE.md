@@ -271,7 +271,7 @@ Rules:
 - Never cite a search results page or an AI answer. The checks reject them.
 - Avoid content farms, AI-written listicles, and travel sites that don't cite anything.
 - For legends, cite a source that tells the story and, ideally, one that examines it.
-- Open every source and confirm it actually says what the fact claims.
+- Open every source and confirm it actually says what the fact claims. Open it with `uv run psst fetch <url> --run <run id>`: `draft submit` refuses any fact citing a source the run never opened.
 - **Read sources with `uv run psst fetch <url>`.** It prints the page as plain text. When a site refuses scripts (Historic England, Londonist, and many newspapers do) or the page is gone, it reads the newest Internet Archive copy instead and says so. Cite the original URL either way. `--archive` goes straight to the archived copy; `--max` shows more of a long page. Use it instead of any built-in web page tool, which many of these sites block. To find sources, never guess URLs:
 
 - **A Wikipedia article's citations:** `uv run psst fetch https://en.wikipedia.org/wiki/<Article> --links` lists every link on the page with its address, including the sources it cites. Cite those, not Wikipedia.

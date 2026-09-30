@@ -10,7 +10,7 @@ import json
 import time
 import urllib.parse
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import h3
@@ -21,6 +21,9 @@ from . import cells, coords, hierarchy, ids, names, net, rules, runs
 ROOT = Path(__file__).resolve().parent.parent
 DRAFT_SCHEMA = json.loads((ROOT / "format" / "draft.schema.json").read_text())
 CLAIM_HOURS = 12
+# Research runs started from this moment must open every source they cite with `psst fetch --run`
+# (runs already under way when the rule was added didn't record their reads).
+SOURCE_READS_REQUIRED_SINCE = datetime(2026, 9, 30, 0, 45, tzinfo=timezone.utc)
 # Places closer than this with a similar name are probably the same thing.
 DUPLICATE_METERS = 150
 LOCAL_WIKIPEDIA = {"CN": "zh", "HK": "zh", "TW": "zh", "MY": "ms", "JP": "ja", "KR": "ko", "FR": "fr", "DE": "de",
@@ -481,6 +484,12 @@ def local_name_problem(conn, local: dict | None, pos: coords.Position) -> str | 
     return None
 
 
+def unread_sources(conn, draft: dict, run_id: str) -> list[str]:
+    read = {r["url_key"] for r in conn.execute("SELECT url_key FROM source_reads WHERE run_id = %s", (run_id,))}
+    urls = dict.fromkeys(s["url"] for p in draft["places"] for f in p["facts"] for s in f["sources"])
+    return [u for u in urls if rules.normalize_url(u) not in read]
+
+
 def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
     """Store a checked draft: new places, their names, sources, and facts in the draft state."""
     if not checked.report.ok:
@@ -491,6 +500,11 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
     if not holder or holder["claimed_by_run"] != run["id"]:
         raise RuntimeError(f"Run {run['id']} doesn't hold the claim on {draft['cell']}; claim it first "
                            "(psst research claim --cell ...).")
+    if run["started_at"] >= SOURCE_READS_REQUIRED_SINCE:
+        unread = unread_sources(conn, draft, run["id"])
+        if unread:
+            raise RuntimeError("Open every source you cite with `psst fetch <url> --run <run id>` before submitting. "
+                               "Not read in this run: " + ", ".join(unread[:15]) + (" and more" if len(unread) > 15 else ""))
     today = date.today().isoformat()
     counts = {"places": 0, "facts": 0, "sources": 0}
     new_place_ids: list[str] = []

@@ -36,6 +36,16 @@ def read_sources(conn, run_id, fact_id):
                     WHERE fs.fact_id = %s ON CONFLICT DO NOTHING""", (run_id, fact_id))
 
 
+def read_draft_sources(conn, run_id, draft):
+    """What `psst fetch <url> --run <id>` records for each source a draft cites."""
+    from psst import rules
+    for place in draft["places"]:
+        for fact in place["facts"]:
+            for source in fact["sources"]:
+                conn.execute("INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, true) ON CONFLICT DO NOTHING",
+                             (run_id, rules.normalize_url(source["url"])))
+
+
 def draft_for(cell, tag_id):
     return {"cell": cell, "notes": "Test draft.", "places": [{
         "name": "Test Bench", "kind": "memorial", "size": "small", "wikidata": "Q999999999",
@@ -62,6 +72,7 @@ def submit(scratch, cell, tag_id):
     researcher = start(scratch, "research", "test-researcher")
     research.claim(scratch, researcher["id"], cell=cell)
     draft = draft_for(cell, tag_id)
+    read_draft_sources(scratch, researcher["id"], draft)
     checked = research.check(scratch, draft, online=False)
     assert checked.report.ok, checked.report.errors
     checked.positions = {0: position_in(cell)}
@@ -246,6 +257,7 @@ def test_every_lead_must_be_accounted_for(scratch, cell, tag_id):
 
     draft["skipped"] = [{"name": "Corner Shop", "reason": "Nothing surprising in the sources."},
                         {"names": ["Old Ward", "Bus Garage"], "reason": "Not physical places, or nothing to say."}]
+    read_draft_sources(scratch, researcher["id"], draft)
     checked = research.check(scratch, draft, online=False)
     assert checked.report.ok, checked.report.errors
     checked.positions = {0: position_in(cell)}
@@ -273,6 +285,7 @@ def test_leads_left_for_later_keep_the_cell_open(scratch, cell, tag_id):
                          researcher["id"])
     draft = draft_for(cell, tag_id)
     draft["skipped"] = [{"name": "Big Tower", "reason": "Not reached in this pass.", "later": True}]
+    read_draft_sources(scratch, researcher["id"], draft)
     checked = research.check(scratch, draft, online=False)
     assert checked.report.ok, checked.report.errors
     checked.positions = {0: position_in(cell)}
@@ -287,3 +300,18 @@ def test_claim_near_a_spot(scratch):
     target = scratch.execute("SELECT cell FROM research_cells WHERE state = 'open' ORDER BY cell DESC LIMIT 1").fetchone()["cell"]
     researcher = start(scratch, "research", "test-researcher")
     assert research.claim(scratch, researcher["id"], near=h3.cell_to_latlng(target))["cell"] == target
+
+
+def test_research_must_open_its_sources(scratch, cell, tag_id):
+    researcher = start(scratch, "research", "test-researcher")
+    research.claim(scratch, researcher["id"], cell=cell)
+    draft = draft_for(cell, tag_id)
+    checked = research.check(scratch, draft, online=False)
+    checked.positions = {0: position_in(cell)}
+    researcher = {**researcher, "started_at": research.SOURCE_READS_REQUIRED_SINCE}
+    with pytest.raises(RuntimeError, match="Open every source"):
+        research.submit(scratch, draft, researcher, checked)
+    from psst import rules
+    scratch.execute("INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, true)",
+                    (researcher["id"], rules.normalize_url("https://example.org/test-bench")))
+    assert research.submit(scratch, draft, researcher, checked)["facts"] == 1
