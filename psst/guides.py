@@ -61,8 +61,8 @@ UNITS = {
 }
 CIRCA = "Q5727902"
 HUMAN = "Q5"
-# What a style should be: an architectural style, an art movement or style, or a style in general. Anything
-# else (a political movement, a person) in "Style" is almost always vandalism.
+# What a style should be (or be a kind of): an architectural style, an art movement or style, or a style in
+# general. Anything else (a political movement, a person) in "Style" is almost always vandalism.
 STYLE_CLASSES = {"Q32880", "Q968159", "Q1792644", "Q1292119", "Q2198855"}
 WIKIPEDIA_LANGUAGES = {"CN": "zh", "HK": "zh", "TW": "zh", "MO": "zh", "MY": "ms", "JP": "ja", "KR": "ko",
                        "FR": "fr", "DE": "de", "ES": "es", "IT": "it"}
@@ -255,7 +255,8 @@ def _sanity_check(found: list[KeyFact], values: dict[str, dict], kind: str, size
                 flag(fact, f"{fact.value} is implausible for one place")
             elif fact.property == "P2048" and (size == "small" or kind == "memorial") and fact.amount > 60:
                 flag(fact, f"{fact.value} is very tall for a {size} {kind}")
-        if fact.property == "P149" and fact.value_id and not STYLE_CLASSES & _classes(values.get(fact.value_id, {})):
+        style = values.get(fact.value_id or "", {})
+        if fact.property == "P149" and fact.value_id and not STYLE_CLASSES & (_classes(style) | _classes(style, "P279")):
             flag(fact, f"{fact.value} isn't recorded on Wikidata as a style")
         if PROPERTY[fact.property][1] == "person" and fact.value_id and built is not None:
             person = values.get(fact.value_id, {})
@@ -269,9 +270,10 @@ def _sanity_check(found: list[KeyFact], values: dict[str, dict], kind: str, size
                 flag(fact, f"died in {died[0]}, {built - died[0]} years before it was built in {built}")
 
 
-def _classes(entity: dict) -> set[str]:
+def _classes(entity: dict, prop: str = "P31") -> set[str]:
+    """What an item is an instance of (P31), or with P279, a subclass of."""
     return {c["mainsnak"].get("datavalue", {}).get("value", {}).get("id")
-            for c in entity.get("claims", {}).get("P31", [])} - {None}
+            for c in entity.get("claims", {}).get(prop, [])} - {None}
 
 
 def wikipedia_page(entity: dict, country: str | None) -> dict | None:

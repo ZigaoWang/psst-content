@@ -124,6 +124,8 @@ def test_implausible_values_are_flagged():
     assert "style" in flags["P149"]
     assert "implausible" in flags["P2048"] and "implausible" in flags["P1101"]
     assert flags["P571"] is None
+    values["Q2"] = {"labels": {"en": {"value": "Italian Baroque"}}, "claims": {"P279": [claim("P279", {"id": "Q32880"})]}}
+    assert guides.key_facts(item({"P149": {"id": "Q2"}}), values, "worship", "medium", date(2026, 10, 1))[0].flag is None
 
 
 def test_conflicting_dates_are_flagged():
