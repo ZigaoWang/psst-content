@@ -1080,12 +1080,13 @@ def guide_submit(args) -> int:
 
 @command("guide next", "Write the next guides to review (flagged ones first, then drafts) to a file.",
          arg("--out", required=True), arg("--limit", type=int, default=40),
-         arg("--city", help="only this city (English name)"), RUN_ARG)
+         arg("--city", help="only this city (English name)"),
+         arg("--from-run", help="only guides this research run wrote, so reviewers can split the work"), RUN_ARG)
 def guide_next(args) -> int:
     from . import guides, runs
     with db.connect() as conn:
         runs.require(conn, args.run, "review")
-        rows = guides.queue(conn, args.limit, args.run, args.city)
+        rows = guides.queue(conn, args.limit, args.run, args.city, args.from_run)
         waiting = conn.execute("SELECT count(*) FILTER (WHERE state = 'draft') AS drafts, "
                                "count(*) FILTER (WHERE needs_review AND state <> 'retired') AS flagged FROM guides").fetchone()
     Path(args.out).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")

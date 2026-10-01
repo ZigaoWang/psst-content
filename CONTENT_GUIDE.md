@@ -514,7 +514,7 @@ uv run psst guide submit work/guides/<run id>/draft.json --run <run id>
 Lighter than a story review, but still a review, in a review run that didn't write the guides:
 
 ```
-uv run psst guide next --out work/guides/review.json --run <run id>    # --city to narrow it, --limit for more than 40
+uv run psst guide next --out work/guides/review.json --run <run id>    # --city or --from-run <research run> to narrow it, --limit for more than 40
 ```
 
 For each guide:

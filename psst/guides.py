@@ -586,13 +586,16 @@ def _guide_rows(conn, where: str, params: dict) -> list[dict]:
         WHERE {where}""", params).fetchall()
 
 
-def queue(conn, limit: int, reviewer_run: str | None = None, city: str | None = None) -> list[dict]:
-    """Guides waiting for review: flagged ones first, then drafts. A run never gets guides it wrote."""
+def queue(conn, limit: int, reviewer_run: str | None = None, city: str | None = None,
+          from_run: str | None = None) -> list[dict]:
+    """Guides waiting for review: flagged ones first, then drafts. A run never gets guides it wrote. With
+    `from_run`, only the guides one research run wrote, so several reviewers can work side by side."""
     return _guide_rows(conn, """(g.state = 'draft' OR (g.needs_review AND g.state IN ('reviewed', 'published')))
           AND (%(run)s::text IS NULL OR g.research_run <> %(run)s)
           AND (%(city)s::text IS NULL OR ci.name = %(city)s)
+          AND (%(from_run)s::text IS NULL OR g.research_run = %(from_run)s)
         ORDER BY g.needs_review DESC, ci.name, nb.name, dn.name LIMIT %(limit)s""",
-                       {"run": reviewer_run, "city": city, "limit": limit})
+                       {"run": reviewer_run, "city": city, "from_run": from_run, "limit": limit})
 
 
 def check_decisions(conn, decisions: object, run: dict) -> rules.Report:
