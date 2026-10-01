@@ -58,7 +58,11 @@ def draft_for(cell, tag_id):
         "facts": [{"category": "quirk", "veracity": "fact", "headline": "The bench faces the car park on purpose",
                    "short": "A family asked for a river view in 1911, and nobody has turned it since.", "long": LONG,
                    "sources": [{"url": "https://example.org/test-bench", "title": "Bench", "publisher": "Example Society"}],
-                   "tags": [tag_id]}]}],
+                   "tags": [tag_id]}],
+        "guide": {"identifier": "Memorial bench, 1911",
+                  "about": "A wooden bench with a brass plaque, paid for by a local family in 1911. It stands on the "
+                           "north side of the square, facing the river side of the car park.",
+                  "sources": [{"url": "https://example.org/test-bench", "title": "Bench", "publisher": "Example Society"}]}}],
         "skipped": [{"name": "A shop", "reason": "Nothing surprising in the sources."}]}
 
 
@@ -82,7 +86,7 @@ def submit(scratch, cell, tag_id):
     checked = research.check(scratch, draft, online=False)
     assert checked.report.ok, checked.report.errors
     checked.positions = {0: position_in(cell)}
-    counts = research.submit(scratch, draft, researcher, checked)
+    counts = research.submit(scratch, draft, researcher, checked, online=False)
     return researcher, counts
 
 
@@ -96,6 +100,8 @@ def test_submit_writes_only_drafts(scratch, cell, tag_id):
     assert fact["state"] == "draft"
     assert (fact["researched_by"], fact["research_run"]) == ("test-researcher", researcher["id"])
     assert str(fact["researched_at"]) == date.today().isoformat()
+    guide = scratch.execute("SELECT * FROM guides WHERE place_id = %s", (place["id"],)).fetchone()
+    assert guide["state"] == "draft" and guide["identifier"] == "Memorial bench, 1911"
     state = scratch.execute("SELECT state, notes FROM research_cells WHERE cell = %s", (cell,)).fetchone()
     assert state["state"] == "drafted" and "A shop" in state["notes"]
 
@@ -106,6 +112,15 @@ def test_submit_needs_the_claim(scratch, cell, tag_id):
     checked.positions = {0: position_in(cell)}
     with pytest.raises(RuntimeError, match="claim"):
         research.submit(scratch, draft_for(cell, tag_id), researcher, checked)
+
+
+def test_new_places_need_a_guide(scratch, cell, tag_id):
+    draft = draft_for(cell, tag_id)
+    del draft["places"][0]["guide"]
+    assert any("guide" in e for e in research.check(scratch, draft, online=False).report.errors)
+    draft = draft_for(cell, tag_id)
+    draft["places"][0]["guide"]["about"] = draft["places"][0]["guide"]["about"].replace("A wooden", "A famous wooden")
+    assert any("judgment" in e for e in research.check(scratch, draft, online=False).report.errors)
 
 
 def test_check_catches_problems(scratch, cell, tag_id):
@@ -197,7 +212,7 @@ def test_an_empty_cell_is_finished_at_once(scratch, cell):
     draft = {"cell": cell, "notes": "Only houses and a car park; nothing held up.", "places": []}
     checked = research.check(scratch, draft, online=False)
     assert checked.report.ok
-    research.submit(scratch, draft, researcher, checked)
+    research.submit(scratch, draft, researcher, checked, online=False)
     row = scratch.execute("SELECT state, notes FROM research_cells WHERE cell = %s", (cell,)).fetchone()
     assert row["state"] == "done" and "car park" in row["notes"]
 
@@ -277,7 +292,7 @@ def test_every_lead_must_be_accounted_for(scratch, cell, tag_id):
     checked = research.check(scratch, draft, online=False)
     assert checked.report.ok, checked.report.errors
     checked.positions = {0: position_in(cell)}
-    research.submit(scratch, draft, researcher, checked)
+    research.submit(scratch, draft, researcher, checked, online=False)
     statuses = {r["key"]: r["status"] for r in scratch.execute("SELECT key, status FROM research_leads WHERE cell = %s", (cell,))}
     assert statuses == {"Q999999999": "added", "name:Corner Shop": "skipped", "Q999999997": "skipped",
                         "Q999999996": "skipped"}
@@ -305,7 +320,7 @@ def test_leads_left_for_later_keep_the_cell_open(scratch, cell, tag_id):
     checked = research.check(scratch, draft, online=False)
     assert checked.report.ok, checked.report.errors
     checked.positions = {0: position_in(cell)}
-    counts = research.submit(scratch, draft, researcher, checked)
+    counts = research.submit(scratch, draft, researcher, checked, online=False)
     assert counts["leads_left"] == 1
     assert scratch.execute("SELECT state FROM research_cells WHERE cell = %s", (cell,)).fetchone()["state"] == "open"
     assert [l["name"] for l in research.open_leads(scratch, cell)] == ["Big Tower"]
@@ -326,11 +341,11 @@ def test_research_must_open_its_sources(scratch, cell, tag_id):
     checked.positions = {0: position_in(cell)}
     researcher = {**researcher, "started_at": research.SOURCE_READS_REQUIRED_SINCE}
     with pytest.raises(RuntimeError, match="Open every source"):
-        research.submit(scratch, draft, researcher, checked)
+        research.submit(scratch, draft, researcher, checked, online=False)
     from psst import rules
     scratch.execute("INSERT INTO source_reads (run_id, url_key, ok) VALUES (%s, %s, true)",
                     (researcher["id"], rules.read_key("https://example.org/test-bench")))
-    assert research.submit(scratch, draft, researcher, checked)["facts"] == 1
+    assert research.submit(scratch, draft, researcher, checked, online=False)["facts"] == 1
 
 
 def test_deeper_picks_the_partly_done_cell_with_most_left(scratch):

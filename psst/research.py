@@ -450,11 +450,17 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
     """Every check a draft must pass before it's stored. Errors block; warnings are for the reviewer."""
     report = rules.Report()
     for error in sorted(jsonschema.Draft202012Validator(DRAFT_SCHEMA).iter_errors(draft), key=lambda e: e.path):
-        # "Not valid under any of the given schemas" says nothing; report the most specific reason instead.
+        # "Not valid under any of the given schemas" says nothing. Report the reasons from the alternative the
+        # entry comes closest to (a new place missing its guide, not "'place' is required").
+        reasons = [error]
         if error.context:
-            error = max(error.context, key=lambda e: len(e.absolute_path))
-        where = "/".join(str(p) for p in error.absolute_path) or "draft"
-        report.error(where, error.message)
+            branches: dict = {}
+            for e in error.context:
+                branches.setdefault(e.relative_schema_path[0], []).append(e)
+            reasons = min(branches.values(), key=len)
+        for reason in reasons:
+            where = "/".join(str(p) for p in reason.absolute_path) or "draft"
+            report.error(where, reason.message)
     if not report.ok:
         return Checked(report)
     cell = draft["cell"]
@@ -484,6 +490,7 @@ def check(conn, draft: dict, online: bool = True) -> Checked:
                                     f'{{"place": "{dup["id"]}", "facts": [...]}}')
             if place.get("localName") and place["localName"]["name"] == place["name"]:
                 report.warn(where, "localName is the same as name; leave it out")
+            rules.check_guide(report, f"{where}.guide", place["guide"])
         for f_index, fact in enumerate(place["facts"]):
             rules.check_fact(report, f"{where}.facts[{f_index}]", fact)
 
@@ -557,12 +564,13 @@ def local_name_problem(conn, local: dict | None, pos: coords.Position) -> str | 
 
 def unread_sources(conn, draft: dict, run_id: str) -> list[str]:
     read = {r["url_key"] for r in conn.execute("SELECT url_key FROM source_reads WHERE run_id = %s", (run_id,))}
-    urls = dict.fromkeys(s["url"] for p in draft["places"] for f in p["facts"] for s in f["sources"])
+    urls = dict.fromkeys([s["url"] for p in draft["places"] for f in p["facts"] for s in f["sources"]]
+                         + [s["url"] for p in draft["places"] for s in p.get("guide", {}).get("sources", [])])
     return [u for u in urls if rules.read_key(u) not in read]
 
 
-def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
-    """Store a checked draft: new places, their names, sources, and facts in the draft state."""
+def submit(conn, draft: dict, run: dict, checked: Checked, online: bool = True) -> dict[str, int]:
+    """Store a checked draft: new places with their guides, their names, sources, and facts in the draft state."""
     if not checked.report.ok:
         raise RuntimeError("The draft has errors; run psst draft check and fix them first.")
     if not run["model"]:
@@ -579,6 +587,7 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
     today = date.today().isoformat()
     counts = {"places": 0, "facts": 0, "sources": 0}
     new_place_ids: list[str] = []
+    new_guides: list[tuple[str, dict]] = []
     fact_tags: dict[str, list[str]] = {}
     for index, entry in enumerate(draft["places"]):
         if "place" in entry:
@@ -600,6 +609,7 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
                 conn.execute("INSERT INTO place_names (place_id, role, lang, name, source) VALUES (%s, 'local', %s, %s, 'research')",
                              (place_id, entry["localName"]["lang"], entry["localName"]["name"]))
             new_place_ids.append(place_id)
+            new_guides.append((place_id, entry))
             counts["places"] += 1
         position = conn.execute("SELECT coalesce(max(position) + 1, 0) AS n FROM facts WHERE place_id = %s",
                                 (place_id,)).fetchone()["n"]
@@ -626,8 +636,14 @@ def submit(conn, draft: dict, run: dict, checked: Checked) -> dict[str, int]:
                 conn.execute("INSERT INTO fact_sources (fact_id, source_id, position) VALUES (%s, %s, %s)",
                              (fact_id, source_id, s_index))
             fact_tags[fact_id] = fact["tags"]
-    from . import tags
+    from . import guides, tags
     tags.assign_many(conn, fact_tags)
+    # Every new place comes with its guide, with key facts read from Wikidata now.
+    found = guides.key_facts_for([{"id": place_id, "wikidata_id": entry.get("wikidata"), "kind": entry["kind"],
+                                   "size": entry.get("size")} for place_id, entry in new_guides]) if online else {}
+    for place_id, entry in new_guides:
+        guides.store(conn, place_id, entry["guide"], run, found.get(place_id, []))
+    counts["guides"] = len(new_guides)
     if new_place_ids:
         # Also fills in each new place's country.
         hierarchy.assign(conn, new_place_ids)

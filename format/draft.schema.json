@@ -118,7 +118,8 @@
           "required": [
             "name",
             "kind",
-            "facts"
+            "facts",
+            "guide"
           ],
           "additionalProperties": false,
           "anyOf": [
@@ -202,6 +203,9 @@
                 "pattern": "^pl_[0-9a-hjkmnp-tv-z]{10}$"
               },
               "description": "Nearby places with similar names that this one is not (a separate structure on the same site). The duplicate check then warns instead of refusing, and the reviewer checks it."
+            },
+            "guide": {
+              "$ref": "#/$defs/guide"
             }
           }
         }
@@ -288,6 +292,57 @@
           "items": {
             "type": "string",
             "pattern": "^tg_[0-9a-hjkmnp-tv-z]{8}$"
+          }
+        }
+      }
+    },
+    "guide": {
+      "type": "object",
+      "description": "Practical information about the place, kept apart from its stories (CONTENT_GUIDE.md, section 13). Every new place needs one. Key facts are added from Wikidata automatically when the draft is submitted.",
+      "required": [
+        "identifier",
+        "about",
+        "sources"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "identifier": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A one-line label for what the place is, like \"Bronze statue, 1843, by Edward Baily\"."
+        },
+        "about": {
+          "type": "string",
+          "minLength": 100,
+          "maxLength": 700,
+          "description": "Two or three neutral sentences: what the place is, why it's there, and why it matters."
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "url",
+              "title",
+              "publisher"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "url": {
+                "type": "string",
+                "pattern": "^https://"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "publisher": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       }
