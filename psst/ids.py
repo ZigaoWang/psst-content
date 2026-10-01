@@ -4,7 +4,7 @@ import hashlib
 import secrets
 
 ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
-LENGTHS = {"pl": 10, "fa": 10, "so": 10, "tg": 8, "run": 10, "im": 10}
+LENGTHS = {"pl": 10, "fa": 10, "so": 10, "tg": 8, "run": 10, "im": 10, "gd": 10}
 
 
 def _encode(data: bytes, length: int) -> str:
