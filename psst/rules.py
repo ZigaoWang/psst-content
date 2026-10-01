@@ -283,3 +283,81 @@ def check_fact(report: Report, where: str, fact: dict) -> None:
         report.error(where, "the same source is cited twice")
     if urls and all(is_wiki(u) for u in urls):
         report.error(where, "every fact needs at least one source that is not Wikipedia or Wikidata")
+
+
+# Guide information (CONTENT_GUIDE.md, section 13): the identifier and About are plain reference text, not
+# stories, so they have their own limits and stricter rules on hype.
+IDENTIFIER_MIN = 3
+IDENTIFIER_MAX = 70
+ABOUT_MIN = 100
+ABOUT_MAX = 700
+
+# Hype and judgment words. Errors in guide text, which must stay neutral. Lowercase words only, so names
+# such as "Grand Union Canal" or "Most Holy Redeemer" are left alone.
+GUIDE_HYPE_WORDS = [
+    "famous", "world-famous", "renowned", "celebrated", "legendary", "world-class", "spectacular", "magnificent",
+    "impressive", "beautiful", "beautifully", "stunning", "majestic", "splendid", "glorious", "gorgeous",
+    "striking", "elegant", "exquisite", "masterpiece", "beloved", "popular", "treasured", "acclaimed", "landmark",
+]
+# Superlatives. A plain record belongs in a key fact or a story, not in the About.
+GUIDE_SUPERLATIVES = [
+    "best", "finest", "greatest", "largest", "biggest", "tallest", "oldest", "longest", "highest",
+    "grandest", "busiest", "smallest", "newest", "earliest", "widest", "deepest", "youngest",
+]
+GUIDE_PHRASES = ["one of the", "among the", "the most", "the least", "known for its", "a must"]
+
+
+def check_guide(report: Report, where: str, guide: dict) -> None:
+    """Everything about a guide's text and sources that a script can check."""
+    identifier, about = guide.get("identifier"), guide.get("about")
+    if not is_nonempty_string(identifier):
+        report.error(where, "identifier must be a non-empty string")
+    else:
+        if not IDENTIFIER_MIN <= len(identifier) <= IDENTIFIER_MAX:
+            report.error(where, f"identifier is {len(identifier)} characters; must be {IDENTIFIER_MIN} to {IDENTIFIER_MAX}")
+        if identifier.endswith("."):
+            report.error(where, "identifier is a label, not a sentence; drop the final period")
+        if not identifier[0].isupper() and not identifier[0].isdigit():
+            report.error(where, "identifier starts with a capital letter")
+        check_prose(report, where, "identifier", identifier)
+        _check_neutral(report, f"{where}.identifier", identifier)
+    if not is_nonempty_string(about):
+        report.error(where, "about must be a non-empty string")
+    else:
+        if not ABOUT_MIN <= len(about) <= ABOUT_MAX:
+            report.error(where, f"about is {len(about)} characters; must be {ABOUT_MIN} to {ABOUT_MAX}")
+        sentences = count_sentences(about)
+        if sentences < 2:
+            report.error(where, "about is two or three sentences")
+        elif sentences > 3:
+            report.warn(where, "about looks like more than three sentences")
+        if not about.endswith((".", ".\"", ".”", ")")):
+            report.error(where, "about ends with a full stop")
+        check_prose(report, where, "about", about)
+        _check_neutral(report, f"{where}.about", about)
+        if re.search(r"\b(you|your)\b", about, re.I):
+            report.warn(f"{where}.about", "addresses the reader; the About describes the place")
+    sources = guide.get("sources")
+    if not isinstance(sources, list) or not sources:
+        report.error(where, "needs at least one source")
+        return
+    keys = []
+    for index, source in enumerate(sources):
+        if check_source(report, f"{where}.sources[{index}]", source):
+            keys.append(normalize_url(source["url"]))
+    if len(set(keys)) != len(keys):
+        report.error(where, "the same source is cited twice")
+
+
+def _check_neutral(report: Report, loc: str, text: str) -> None:
+    words = set(re.findall(r"(?<![A-Za-z])[a-z]+(?:-[a-z]+)*(?![A-Za-z])", text))
+    for word in GUIDE_HYPE_WORDS:
+        if word in words:
+            report.error(loc, f"'{word}' is a judgment; say what the place is, plainly")
+    for word in GUIDE_SUPERLATIVES:
+        if word in words:
+            report.error(loc, f"'{word}' is a superlative; guide text has none (records belong in stories)")
+    lowered = text.lower()
+    for phrase in GUIDE_PHRASES:
+        if re.search(r"(?<![a-z])" + re.escape(phrase) + r"(?![a-z])", lowered):
+            report.error(loc, f"'{phrase}' is filler; say what the place is")
