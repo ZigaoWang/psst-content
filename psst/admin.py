@@ -60,6 +60,24 @@ def build(conn) -> dict:
                i.thumb_file AS thumb, i.full_file AS full, i.added_by, i.reviewed_by, i.review_notes, i.retire_reason,
                to_char(i.created_at, 'YYYY-MM-DD') AS added
         FROM images i ORDER BY i.place_id, i.position, i.id""")
+    guides = _rows(conn, """
+        SELECT g.id, g.place_id, g.state, g.needs_review, g.identifier, g.about, g.wikidata_id AS wikidata,
+               g.researched_by, g.reviewed_by, g.review_notes, g.retire_reason,
+               to_char(g.researched_at, 'YYYY-MM-DD') AS researched, to_char(g.reviewed_at, 'YYYY-MM-DD') AS reviewed,
+               to_char(g.published_at, 'YYYY-MM-DD') AS published,
+               coalesce((SELECT json_agg(json_build_object('title', s.title, 'publisher', s.publisher, 'url', s.url)
+                                         ORDER BY gs.position)
+                         FROM guide_sources gs JOIN sources s ON s.id = gs.source_id WHERE gs.guide_id = g.id), '[]') AS sources,
+               coalesce((SELECT json_agg(json_build_object('property', k.property, 'label', k.label, 'value', k.value,
+                                                           'value_id', k.value_id, 'flag', k.flag,
+                                                           'confirmed', k.flag_confirmed) ORDER BY k.position)
+                         FROM guide_key_facts k WHERE k.guide_id = g.id), '[]') AS key_facts,
+               coalesce((SELECT json_agg(json_build_object('at', to_char(e.at, 'YYYY-MM-DD HH24:MI'), 'to', e.to_state,
+                                                           'changes', e.changes, 'actor', e.actor, 'note', e.note)
+                                         ORDER BY e.id)
+                         FROM guide_events e WHERE e.guide_id = g.id), '[]') AS history
+        FROM guides g JOIN places p ON p.id = g.place_id AND p.state = 'active'
+        ORDER BY g.place_id, g.created_at""")
     reports = _rows(conn, """
         SELECT r.id, r.fact_id, r.reason, r.message, r.app_version, r.state, r.resolution,
                to_char(r.created_at, 'YYYY-MM-DD HH24:MI') AS at, f.headline, f.place_id
@@ -150,10 +168,13 @@ def build(conn) -> dict:
         "tags": len(tags),
         "migrated_verified": sum(1 for f in facts if f["migrated"] and f["state"] == "published" and f["verified"]),
         "migrated_published": sum(1 for f in facts if f["migrated"] and f["state"] == "published"),
+        "guides": {s: sum(1 for g in guides if g["state"] == s) for s in ("published", "reviewed", "draft", "retired")},
+        "places_with_guides": len({g["place_id"] for g in guides if g["state"] == "published"}
+                                  & {p["id"] for p in live_places}),
     }
     generated = conn.execute("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI \"UTC\"') AS at").fetchone()["at"]
     return {"generatedAt": generated, "totals": totals, "cities": cities, "places": places, "facts": facts,
-            "images": images, "reports": reports, "runs": runs, "demand": demand, "publications": publications,
+            "images": images, "guides": guides, "reports": reports, "runs": runs, "demand": demand, "publications": publications,
             "tags": tags, "backup": status}
 
 

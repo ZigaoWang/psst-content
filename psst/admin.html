@@ -103,7 +103,7 @@
 const TABS = [["overview", "Overview"], ["places", "Places"], ["review", "Review queue"], ["photos", "Photos"],
               ["reports", "Reports"], ["runs", "Runs"], ["demand", "Demand"], ["map", "Map"]];
 const STATE_COLORS = {done: "var(--green)", partial: "#7fb77e", in_progress: "var(--accent)", untouched: "var(--chip)"};
-let D, byPlace = {}, factsByPlace = {}, imagesByPlace = {};
+let D, byPlace = {}, factsByPlace = {}, imagesByPlace = {}, guidesByPlace = {};
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 // Small shares keep a decimal, so 5 of 1,930 reads 0.3%, not 0%.
 const pct = (a, b) => { if (!b || !a) return "0%"; const v = 100 * a / b; return (v < 10 ? v.toFixed(1) : Math.round(v)) + "%"; };
@@ -120,6 +120,7 @@ async function load() {
   for (const p of D.places) byPlace[p.id] = p;
   for (const f of D.facts) (factsByPlace[f.place_id] ||= []).push(f);
   for (const i of D.images) (imagesByPlace[i.place_id] ||= []).push(i);
+  for (const g of D.guides || []) (guidesByPlace[g.place_id] ||= []).push(g);
   const live = D.publications[0];
   document.getElementById("meta").textContent =
     `Data from ${D.generatedAt}` + (live ? ` · live version ${live.version}, published ${live.at} UTC` : "");
@@ -159,6 +160,7 @@ function renderOverview() {
     ${card(fmt(t.live_places), "places live in the app", "places")}
     ${card(fmt(t.facts.published), "published stories", "places")}
     ${card(fmt(waiting), `waiting for review (${t.facts.draft} draft, ${t.facts.reviewed} approved, ${t.flagged} flagged, ${t.photos.draft + t.photos.reviewed} photos)`, "review")}
+    ${card(`${pct(t.places_with_guides, t.live_places)}`, `of live places have guide information (${fmt(t.places_with_guides)} of ${fmt(t.live_places)}; ${fmt(t.guides.draft + t.guides.reviewed)} waiting)`, "review")}
     ${card(`${pct(t.places_with_photos, t.live_places)}`, `of live places have a photo (${fmt(t.places_with_photos)} of ${fmt(t.live_places)})`, "photos")}
     ${card(fmt(t.open_reports), "open problem reports", "reports")}
     ${card(`${pct(t.migrated_verified, t.migrated_published)}`, `of migrated stories verified (${fmt(t.migrated_verified)} of ${fmt(t.migrated_published)})`)}
@@ -269,7 +271,7 @@ function filterPlaces() {
         ${th("drafts", "Waiting", "num")}${th("photos", "Photos", "num")}${th("created", "Added")}</tr>
     ${rows.slice(0, placeLimit).map(p => `<tr class="click" onclick="location.hash='place/${p.id}'">
       <td><b>${esc(p.name)}</b>${p.local_name ? ` <span class="muted">${esc(p.local_name)}</span>` : ""}
-          ${p.flagged ? badge("flagged") : ""}<div class="small muted">${p.id}</div></td>
+          ${p.flagged ? badge("flagged") : ""}<div class="small muted">${esc(identifierOf(p.id) || "")}${identifierOf(p.id) ? " · " : ""}${p.id}</div></td>
       <td>${esc([p.neighborhood, p.district, p.city].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", "))}</td>
       <td>${esc(p.kind)}</td><td class="num">${p.published}</td>
       <td class="num">${p.drafts + p.reviewed || ""}</td>
@@ -285,6 +287,8 @@ function openPlace(id) {
   const p = byPlace[id], drawer = document.getElementById("drawer");
   if (!p) { drawer.innerHTML = `<p>No place ${esc(id)}.</p>`; drawer.classList.add("on"); return; }
   const facts = factsByPlace[id] || [], photos = imagesByPlace[id] || [];
+  const guides = (guidesByPlace[id] || []).filter(g => g.state !== "retired");
+  const live = guides.find(g => g.state === "published");
   const links = [
     p.wikidata && `<a href="https://www.wikidata.org/wiki/${p.wikidata}" target="_blank">Wikidata ${p.wikidata}</a>`,
     p.osm && `<a href="https://www.openstreetmap.org/${p.osm}" target="_blank">OpenStreetMap ${esc(p.osm)}</a>`,
@@ -294,6 +298,7 @@ function openPlace(id) {
   drawer.innerHTML = `<button class="close" onclick="closeDrawer(true)">Close</button>
     <div class="muted small">${esc(p.kind)} · ${esc(p.size || "")}</div>
     <h2 style="font-size:24px;margin:4px 0">${esc(p.name)}</h2>
+    ${live ? `<div style="font-size:16px;font-weight:600">${esc(live.identifier)}</div>` : ""}
     ${p.local_name ? `<div class="muted" style="font-size:16px">${esc(p.local_name)}</div>` : ""}
     <div class="kv">
       <div>Where</div><div>${esc([p.neighborhood, p.district, p.city, p.country].filter(Boolean).join(", "))}</div>
@@ -302,6 +307,8 @@ function openPlace(id) {
       <div>Research cell</div><div>${esc(p.cell)} · <a href="map.html" target="_blank">coverage map</a></div>
       <div>Id</div><div>${p.id} · added ${esc(p.created)}</div>
     </div>
+    <h2>About</h2>
+    ${guides.map(guideBlock).join("") || `<div class="empty">No guide information yet.<br><code>uv run psst guide prepare --place ${p.id}</code></div>`}
     <h2>Photos</h2>
     ${photos.length ? `<div class="thumbs">${photos.map(photoFigure).join("")}</div>`
       : `<div class="empty">No photo yet. The app shows the map and Look Around.<br><code>uv run psst images find --place ${p.id}</code></div>`}
@@ -345,6 +352,35 @@ function factBlock(f) {
   </div>`;
 }
 
+// The identifier readers see: the live guide's, else the one waiting for review.
+const identifierOf = id => { const g = (guidesByPlace[id] || []).filter(g => g.state !== "retired");
+  return (g.find(x => x.state === "published") || g[0])?.identifier; };
+
+function guideBlock(g) {
+  return `<div class="fact">
+    ${badge(g.state)} ${g.needs_review && g.state !== "retired" ? badge("flagged") : ""}
+    <h3>${esc(g.identifier)}</h3>
+    <div class="short">${esc(g.about)}</div>
+    ${g.key_facts.length ? `<table class="small keyfacts">${g.key_facts.map(k => `<tr><td class="muted">${esc(k.label)}</td>
+      <td>${k.value_id ? `<a href="https://www.wikidata.org/wiki/${k.value_id}" target="_blank">${esc(k.value)}</a>` : esc(k.value)}
+        ${k.flag ? `<br>${badge(k.confirmed ? "reviewed" : "flagged", k.confirmed ? "checked: " + k.flag : k.flag)}` : ""}</td>
+      <td class="muted"><a href="https://www.wikidata.org/wiki/Property:${k.property}" target="_blank">${k.property}</a></td></tr>`).join("")}</table>`
+      : `<div class="small muted">No key facts${g.wikidata ? "" : " (no Wikidata item)"}.</div>`}
+    <details open><summary>Sources (${g.sources.length})</summary><ol class="small">${g.sources.map(s =>
+      `<li><a href="${esc(s.url)}" target="_blank">${esc(s.title)}</a> <span class="muted">${esc(s.publisher)}</span></li>`).join("")}</ol></details>
+    <div class="kv small">
+      <div>Written</div><div>${esc(g.researched || "")} by ${esc(g.researched_by || "?")}</div>
+      <div>Reviewed</div><div>${g.reviewed ? `${esc(g.reviewed)} by ${esc(g.reviewed_by)}` : "not yet"}</div>
+      ${g.review_notes ? `<div>Review notes</div><div>${esc(g.review_notes)}</div>` : ""}
+      ${g.wikidata ? `<div>Key facts from</div><div><a href="https://www.wikidata.org/wiki/${g.wikidata}" target="_blank">Wikidata ${g.wikidata}</a></div>` : ""}
+      <div>Id</div><div>${g.id}</div>
+    </div>
+    ${g.history.length ? `<details><summary>History (${g.history.length})</summary><table class="small">${g.history.map(e =>
+      `<tr><td>${esc(e.at)}</td><td>${badge(e.to)}</td><td>${esc((e.changes || []).join(", "))}</td>
+       <td>${esc(e.actor)}</td><td>${esc(e.note || "")}</td></tr>`).join("")}</table></details>` : ""}
+  </div>`;
+}
+
 function closeDrawer(back) {
   document.getElementById("drawer").classList.remove("on");
   if (back && location.hash.startsWith("#place/")) location.hash = document.getElementById("main").dataset.tab || "places";
@@ -368,8 +404,9 @@ document.getElementById("lightbox").addEventListener("click", e => e.currentTarg
 function renderReview() {
   const waiting = D.facts.filter(f => f.state === "draft" || f.state === "reviewed" || (f.needs_review && f.state !== "retired"));
   const photos = D.images.filter(i => i.state === "draft" || i.state === "reviewed" || (i.needs_review && i.state !== "retired"));
+  const guides = (D.guides || []).filter(g => g.state === "draft" || g.state === "reviewed" || (g.needs_review && g.state !== "retired"));
   const label = f => f.needs_review && f.state === "published" ? badge("flagged") : badge(f.state, f.state === "reviewed" ? "approved, not published" : f.state);
-  return `<p class="muted">Stories and photos waiting for a review run, or approved and waiting for <code>psst publish</code>.
+  return `<p class="muted">Stories, guide information, and photos waiting for a review run, or approved and waiting for <code>psst publish</code>.
     Reviewing happens in a Claude Code session: <code>review</code>.</p>
     <h2>Stories (${waiting.length})</h2>
     ${waiting.length ? `<table><tr><th>Story</th><th>Place</th><th>State</th><th>Written</th></tr>
@@ -377,6 +414,14 @@ function renderReview() {
         <div class="small muted">${esc(f.short)}</div></td><td>${esc(byPlace[f.place_id]?.name)}</td>
         <td>${label(f)}</td><td class="small">${esc(f.researched || "")}<br>${esc(f.researched_by || "")}</td></tr>`).join("")}</table>`
       : `<div class="empty">Nothing waiting.</div>`}
+    <h2>Guide information (${guides.length})</h2>
+    ${guides.length ? `<table><tr><th>Identifier and About</th><th>Place</th><th>State</th><th>Written</th></tr>
+      ${guides.slice(0, 300).map(g => `<tr class="click" onclick="location.hash='place/${g.place_id}'"><td><b>${esc(g.identifier)}</b>
+        <div class="small muted">${esc(g.about)}</div>${g.key_facts.some(k => k.flag && !k.confirmed) ? badge("flagged", "key fact flagged") : ""}</td>
+        <td>${esc(byPlace[g.place_id]?.name)}</td><td>${label(g)}</td>
+        <td class="small">${esc(g.researched || "")}<br>${esc(g.researched_by || "")}</td></tr>`).join("")}</table>
+      ${guides.length > 300 ? `<p class="small muted">And ${fmt(guides.length - 300)} more.</p>` : ""}`
+      : `<div class="empty">No guide information waiting.</div>`}
     <h2>Photos (${photos.length})</h2>
     ${photos.length ? `<div class="grid">${photos.map(photoCard).join("")}</div>` : `<div class="empty">No photos waiting.</div>`}`;
 }
