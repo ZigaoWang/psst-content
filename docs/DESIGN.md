@@ -68,6 +68,16 @@ All tables live in the `psst` schema. The SQL is in `db/migrations/`, applied in
 - Our own copies, named by their hash: `full_file` (1,920 px on the long side) and `thumb_file` (640 px), progressive JPEGs with all metadata removed, served from `/images/`.
 - `image_events` records every change, like `fact_events`; `image_views` records which photos a review run actually looked at, and approving one it never opened is refused.
 
+### Guide information
+
+`guides` holds the practical information about a place, kept apart from its stories: a one-line `identifier`, a short neutral `about`, and the Wikidata item its key facts came from. It has the same lifecycle and provenance as a fact (`draft`, `reviewed`, `published`, `retired`, with the research and review runs and notes), and `guide_events` records every change. At most one guide per place waits for review; publishing a new one retires the one it replaces.
+
+- `guide_sources` links a guide to `sources`, in order, like `fact_sources`.
+- `guide_key_facts` holds one row per value, read from Wikidata by the tools and never typed: the `property` it came from (`P170`, `P571`, ...), an English `label`, the `value` as shown, the `value_id` when it's an item, and a `flag` when a sanity check found it implausible. A review must confirm (`flag_confirmed`) or drop every flagged value before approving.
+- `guide_claims` keeps two sessions from writing the same place's guide.
+
+Every new place comes with a guide in its research draft, and a place goes live only once its guide is reviewed. Opening hours, websites, and phone numbers are never stored: the app reads them from Apple Maps on the device.
+
 `sources` stores each URL once: normalized `url`, `title`, `publisher`, `language`, `archived_url`, and the result of the last link check. `fact_sources` links facts to sources in order.
 
 ### Tags
@@ -129,7 +139,7 @@ Every Saturday `psst sources check` requests every cited link; a source that fai
 - **Version 2** is a set of static files under `/content/<channel>/v2/`, where the channel is `staging` or `production`:
   - `manifest.json`: `formatVersion`, `contentVersion`, `generatedAt`, and the list of packs with their size and SHA-256.
   - `packs/common.<hash>.json.gz`: cities, the hierarchy, tags, and the legacy id map.
-  - `packs/city-<id>.<hash>.json.gz`: one per city, with its places, names, published facts, and published photos (credit, alt text, focus, and the file names under `/images/`). `images` is optional, so older apps ignore it.
+  - `packs/city-<id>.<hash>.json.gz`: one per city, with its places, names, published facts, and published photos (credit, alt text, focus, and the file names under `/images/`). `images` is optional, so older apps ignore it. So is `guide` (identifier, About, sources, and key facts with their Wikidata properties).
 - **Immutability:** pack files are named by their hash, so they never change once written. Promoting to production only swaps `manifest.json`, which is atomic. Old manifests are kept, so `psst rollback` is instant.
 - **Offline:** the app ships with a snapshot of production (`psst bundle` copies it into the app before a build), so it works offline from the first launch.
 - **Updates:** in the background it fetches the manifest and downloads only the packs whose hashes changed. It checks each hash, decodes everything, and only then swaps the new set in as the current content. Anything that fails leaves the previous content in place. The app always keeps the last good version.

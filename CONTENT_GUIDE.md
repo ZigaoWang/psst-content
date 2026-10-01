@@ -16,10 +16,11 @@ This is the handbook for researching, reviewing, and publishing Psst's places an
 10. Tags
 11. The draft format
 12. Reviewing
-13. Photos
-14. Publishing
-15. Fixing published content
-16. Regional notes
+13. Guide information
+14. Photos
+15. Publishing
+16. Fixing published content
+17. Regional notes
 
 ## 1. What Psst is for
 
@@ -32,6 +33,8 @@ Three rules sit above everything else in this guide:
 - **Surprising.** If a friend wouldn't say "wait, really?", it doesn't go in.
 - **True.** Every fact is sourced, and anything unproven is labeled as a legend or disputed. Never let a good story pass as a fact.
 - **Findable.** Every place is one physical thing someone can walk up to and point at, with a pin from a real source.
+
+Psst is also a guide. Every place carries plain practical information, kept apart from its stories: a one-line identifier ("Bronze statue, 1843, by Edward Baily"), a short About saying what the place is, key facts from Wikidata, and, in the app, opening hours and contacts from Apple Maps. The stories stay exactly as they are; section 13 covers the guide information and its own rules.
 
 ## 2. How content flows
 
@@ -54,7 +57,7 @@ The jobs:
 
 - **Researcher:** claims a cell, researches it, and submits a draft (sections 5 to 11).
 - **Reviewer:** a different run, skeptical by default, that approves, edits, or rejects each draft fact and handles problem reports (section 12).
-- **Publisher:** runs `psst publish`, which stages everything, checks it, and only then goes live (section 14).
+- **Publisher:** runs `psst publish`, which stages everything, checks it, and only then goes live (section 15).
 
 Review always happens in a separate session from the research. A run can never review its own research. Any model can review, as long as it follows this guide.
 
@@ -104,7 +107,7 @@ uv run psst run finish $PSST_RUN
 5. **Account for every lead, best known first.** The brief lists leads by how many Wikipedias cover them, and marks the ones in 20 or more WELL KNOWN: those are what readers expect to find (a cathedral, a famous square, its statues), so cover them in this pass before the rest, and never leave one for later just because it's big. `psst draft check` warns when one is. Density is the point: a cell counts as researched only when every lead is added as a place, already in Psst, or in the draft's `skipped` list with a reason. `psst draft check` names any left over. A lead counts as added when a place in the draft has its Wikidata id, OSM element, or exact name; a lead that's the same thing under another id goes in `skipped` with the reason "same as <place>". Most leads will be skipped, and that's fine: one reason can cover many (`"names": ["25 Bank Street", "40 Bank Street"], "reason": "Office towers with nothing surprising in any source"`). A dense cell can have 200 leads; if you can't do them all well, add what you finish and put the rest in `skipped` with `"later": true`. The cell then stays open for the next pass, and nothing is lost.
 6. **Add what the sweep can't see.** Heritage and plaque records (Historic England in the UK, the equivalent body elsewhere), local history societies, station and transit histories, pub histories, filming location databases, music history sites. Then sanity check against the obvious: if a visitor would expect a place here, it should be here, unless there's truly nothing surprising to say.
 7. **Check nothing is already in Psst.** `uv run psst places search "Cutty Sark"` finds places by name in any language, or by Wikidata id or OSM element, and `uv run psst places show <id>` lists a place's stories, so a new fact doesn't repeat one. To add facts to an existing place, reference its id in the draft (section 11); never create it again.
-8. **Research and cut** (section 6), **write** (sections 7 and 8), **tag** (section 10), and save the draft as `work/<cell>/draft.json` (section 11).
+8. **Research and cut** (section 6), **write** (sections 7 and 8), **tag** (section 10), write each new place's guide information (section 13), and save the draft as `work/<cell>/draft.json` (section 11).
 9. **Check the draft** until it has no errors, and read every warning:
    ```
    uv run psst draft check work/<cell>/draft.json
@@ -115,7 +118,7 @@ uv run psst run finish $PSST_RUN
    ```
    uv run psst draft submit work/<cell>/draft.json
    ```
-   Everything is stored as drafts. New places get their coordinates, license, city, district, and neighborhood automatically, and names in other languages from Wikidata and OpenStreetMap. The cell moves to `drafted` (or stays open, if leads were left for later).
+   Everything is stored as drafts. New places get their coordinates, license, city, district, and neighborhood automatically, names in other languages from Wikidata and OpenStreetMap, and their guide's key facts from Wikidata. The cell moves to `drafted` (or stays open, if leads were left for later).
 12. **Finish the run.**
 
 A cell can come out empty. Suburbs and parks sometimes have nothing that clears the bar. Submit a draft with no places, every lead in `skipped`, and a `notes` line saying what you checked, so nobody repeats the work. The cell is marked done straight away.
@@ -358,6 +361,11 @@ A draft is one JSON file for one cell. The schema is `format/draft.schema.json`;
       "size": "medium",
       "wikidata": "Q935104",
       "osm": "way/40778038",
+      "guide": {
+        "identifier": "Pedestrian tunnel under the Thames, 1902",
+        "about": "Two or three neutral sentences: what it is, why it's there, and why it matters.",
+        "sources": [ { "url": "https://www.royalgreenwich.gov.uk/...", "title": "Greenwich Foot Tunnel", "publisher": "Royal Borough of Greenwich" } ]
+      },
       "facts": [
         {
           "category": "history",
@@ -393,6 +401,7 @@ A draft is one JSON file for one cell. The schema is `format/draft.schema.json`;
 | `places[].place` | For facts about a place already in Psst: its id (`pl_...`). Nothing else about the place goes in. |
 | `places[].name`, `localName`, `kind`, `size` | For a new place. See section 9. |
 | `places[].wikidata`, `osm` | For a new place: at least one. If you give both, they must be the same thing. |
+| `places[].guide` | Required for a new place: `identifier`, `about`, and `sources` (section 13). Key facts are added from Wikidata on submit. Existing places get theirs through `psst guide` (section 13). |
 | `places[].distinctFrom` | Optional. Ids of nearby places with similar names that this one is not (a windmill base next to the engine house on the same site). `draft check` then warns instead of refusing, and the reviewer confirms it. |
 | `places[].facts` | 1 to 4 facts, best first. Each has `category`, `veracity`, `headline`, `short`, `long`, `sources` (each with `url`, `title`, `publisher`), and `tags` (tag ids; `[]` for none). |
 | `skipped` | Every lead from the brief you didn't add: `name` (or `names`, a list, for several with one reason), `reason`, and optionally `wikidata` or `osm`. Add `"later": true` for leads not reached in this pass; the cell stays open for them. |
@@ -438,6 +447,8 @@ Review is where Psst stays trustworthy. Assume every draft has a mistake in it u
 
 `uv run psst reports list` shows open problem reports from the app. They're also in `review next`.
 
+Guide information has its own, lighter review (section 13): `psst guide next` and `psst guide apply`.
+
 ### Verifying migrated facts
 
 The 2,365 facts migrated from the old area files were checked by the old validator (format and writing rules), never by a skeptical review. They stay published while they're verified, city by city:
@@ -449,7 +460,91 @@ uv run psst review next --verify --city "Kuala Lumpur" --out work/review.json
 
 `--verify` picks published facts nobody has checked since the migration. To keep this affordable, check each claim with `uv run psst fetch <url> --run <run id> --find "<its names, dates, numbers>"`, which shows only the passages that mention them, and read a whole page only when those don't settle it (START.md, "Verify old content"). Add `--sample` for a random selection: reviewing 60 or so sampled facts per city estimates how accurate that city's content is, for far fewer tokens than checking every fact, and tells you whether a full pass is worth it. Review them exactly as above. Approving marks a fact verified; an edit changes it at the next publish; a rejection takes it down at the next publish. Publish after each batch of decisions.
 
-## 13. Photos
+## 13. Guide information
+
+Stories are the surprise. Guide information is the plain answer to "what am I looking at?", the part a guidebook does well. It lives beside the stories, never inside them, and every place has it: a new place can't be submitted without it, and a place doesn't go live until its guide is reviewed.
+
+### What it has
+
+- **Identifier:** one line naming what the place is, up to 70 characters, shown on feed cards and at the top of the place page. Kind, material, date, maker, in that order of usefulness: "Bronze statue, 1843, by Edward Baily", "Underground station, 1907, by Leslie Green", "Victorian pub, rebuilt 1890s", "Art Deco cinema, now a supermarket". Not a sentence (no final period), not the name again, nothing you'd have to look up.
+- **About:** two or three sentences, 100 to 700 characters: what the place is, why it's there, and why it matters. Its sources, like a story's.
+- **Key facts:** values from the place's Wikidata item, shown as an info box (creator, architect, date built or opened, style, height, material, what it commemorates, heritage status, and similar). The tools read them, never you, and each keeps the Wikidata property it came from.
+- **Visitor information** (opening hours, website, phone) comes from Apple Maps in the app, live, when someone opens the place. It's never stored in the database, so there's nothing to write or check.
+
+### Writing the About
+
+The About has its own rules, different from a story's:
+
+- **Plain and informative.** Neutral, third person, past and present tense as facts need. "A Grade II listed pub built in 1897 for the Truman brewery. It replaced an 18th-century inn on the same site and kept its name." It may read like an encyclopedia: the "not the guidebook paragraph" rule (section 1) is for stories, not the About.
+- **No hype, no superlatives.** No "famous", "iconic", "stunning", "beautiful", "popular", "landmark", "one of the", "the most", "largest", "oldest", "finest", and nothing else that judges. A record that really matters belongs in a story or a key fact. The checks reject these words (capitalized names like "Grand Union Canal" are fine).
+- **Don't use up the stories.** Say what the place is; leave the surprise to the stories. If the About and a story say the same thing, cut it from the About.
+- **Agree with the key facts and the stories.** Same dates, same names, same spelling.
+- **Every other writing rule applies:** US English, no em or en dashes, no exclamation marks, your own words.
+- **Sources:** at least one, opened with `psst fetch`. Wikipedia is fine for the About (it's what Wikipedia is for); prefer the official listing or the owner's page when you have it.
+
+### Key facts and their checks
+
+`psst guide prepare` and `psst draft submit` read the item's claims and keep only what can be shown plainly: preferred values over normal ones, never deprecated or ended ones (a former operator), English labels only, lengths and areas in metric. Each value is sanity checked, and anything implausible is **flagged** for the reviewer:
+
+- a date in the future, before about 3000 BC, or an opening before the building date;
+- several different dates or measurements for one thing;
+- a height, length, area, floor count, or capacity no single place could have, or a height far too tall for a small thing or a statue;
+- an architect or creator born after the place was built, or who died long before it;
+- a "style" that isn't recorded on Wikidata as a style (vandalism looks like this).
+
+Delete a key fact from the draft if it doesn't fit (a "named after" that only repeats the name); you can't add or change one. If Wikidata itself is wrong, leave the value out and, if you like, fix Wikidata separately.
+
+### Adding guide information
+
+New places get theirs in the research draft (`places[].guide`, section 11). For places that don't have one yet, in a research run:
+
+```
+uv run psst guide prepare --city London --limit 40 --run <run id>   # or --cell <cell>, or --place pl_... (repeatable)
+```
+
+It claims places that have stories and no guide (12 hours, so two sessions never write the same one), reads Wikidata and the Wikipedia lead for each, and writes `work/guides/<run id>/brief.md` and `draft.json`. The brief has each place's key facts (with flags), its Wikipedia lead (already counted as read for the run), and its stories. Fill in `identifier` and `about` for every entry, adjust `sources`, delete key facts that don't belong, and remove an entry entirely to skip a place. Then:
+
+```
+uv run psst guide check work/guides/<run id>/draft.json --run <run id>
+uv run psst guide submit work/guides/<run id>/draft.json --run <run id>
+```
+
+### Reviewing guide information
+
+Lighter than a story review, but still a review, in a review run that didn't write the guides:
+
+```
+uv run psst guide next --out work/guides/review.json --run <run id>    # --city to narrow it, --limit for more than 40
+```
+
+For each guide:
+
+- Open at least one of its sources with `psst fetch` (`--find` with the About's names and dates is usually enough) and check the About against it, and against the key facts and the stories.
+- Check the identifier names the right kind of thing, with the right date and maker.
+- Check every **flagged** key fact on its Wikidata item or a source: confirm it or drop it. Approving with an unchecked flag is refused. Drop any other value that is plainly wrong.
+- Check the writing rules above.
+
+Write `work/guides/decisions.json`, one decision per guide:
+
+```json
+[
+  { "guide": "gd_3k9x2m4q7p", "decision": "approve",
+    "notes": "Wikipedia lead confirms the 1907 opening and Leslie Green; listing gives Grade II." },
+  { "guide": "gd_8w2n5v1c0r", "decision": "edit", "dropKeyFacts": ["P2048"], "confirmKeyFacts": ["P571"],
+    "notes": "Height on Wikidata is vandalized; the 1843 date matches the Historic England listing.",
+    "changes": { "identifier": "Granite column, 1843" } },
+  { "guide": "gd_1q7z4t9y2e", "decision": "reject", "reason": "Describes the church next door.",
+    "notes": "The About and the key facts are for St Mary's, not this chapel." }
+]
+```
+
+- `changes` can set `identifier`, `about`, and `sources` (the full new list). `dropKeyFacts` and `confirmKeyFacts` take Wikidata properties and work with approve or edit.
+- Notes are required, say what you checked for that place, and can't be repeated across decisions.
+- `uv run psst guide apply work/guides/decisions.json --dry-run --run <run id>`, fix anything it reports, then apply. `psst publish` puts approved guides in the app, retiring the guide each one replaces.
+
+`uv run psst guide progress` shows how many places have guide information, per city. `uv run psst guide flag <id> --reason "..."` sends a published guide back for review.
+
+## 14. Photos
 
 A photo helps a reader find the place and see what the story is about. A place without a reviewed photo shows the map and Look Around instead, which is fine: no photo is better than a wrong or misleading one.
 
@@ -548,7 +643,7 @@ Write `work/images/decisions.json`:
 
 **Fixing a published photo:** `uv run psst images flag <id> --reason "..."` sends it back to review (it stays up until then). `uv run psst images retire <id> --reason "..."` takes it down at the next publish, for example when a license turns out to be wrong.
 
-## 14. Publishing
+## 15. Publishing
 
 ```
 uv run psst publish
@@ -556,10 +651,12 @@ uv run psst publish
 
 This one command:
 
-1. Exports everything published, plus every reviewed fact and photo, into content format 2 (a manifest and one pack per city; `format/v2/`). The export is deterministic: the same database always gives byte-identical files.
+1. Exports everything published, plus every reviewed fact, photo, and guide, into content format 2 (a manifest and one pack per city; `format/v2/`). The export is deterministic: the same database always gives byte-identical files.
 2. Re-checks every exported fact against the writing rules and every pack against its schema.
 3. Uploads to **staging** and downloads it back exactly as the app would, checking every hash, every reference (places to areas, facts to tags), that every new photo file is served, every old place id, and that the number of places and facts hasn't dropped by more than 2 percent.
-4. Only if all of that passes, promotes staging to **production** by switching one file atomically. Reviewed facts become `published`, and finished cells become `done`.
+4. Only if all of that passes, promotes staging to **production** by switching one file atomically. Reviewed facts, photos, and guides become `published`, and finished cells become `done`.
+
+A place goes live only with its guide: reviewed stories for a place that isn't live yet wait until its guide is reviewed too.
 
 If any check fails, production is untouched and the problems are listed. Apps keep the last good version they have, and they never switch to a download that doesn't check out.
 
@@ -570,7 +667,7 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 - `uv run psst bundle` copies what production serves into the app repository (`../psst-map/Content/v2`) as the snapshot the app ships with. Do it before an app release, then rebuild the app.
 - **The admin page** at `https://psst.zigao.wang/admin/` (user `psst`; the password is in `/www/wwwroot/psst/coverage.password` on the server) shows everything, read-only: totals and per-city progress, every place with its stories, sources, photos, review notes, and history, the review queue, problem reports, runs, demand, publishing, backups, and the coverage map (every cell by state, with a heat layer of the empty areas app users looked at most). The server rebuilds it every 10 minutes and `psst publish` refreshes it at once; `uv run psst admin` rebuilds it by hand.
 
-## 15. Fixing published content
+## 16. Fixing published content
 
 - **Something is wrong in a published fact:** `uv run psst review flag <fact id> --reason "..."`. It stays live until a review run approves, edits, or rejects it (section 12). Readers' problem reports from the app do the same automatically.
 - **Dead links:** every Saturday the server checks every cited link (`psst sources check`). A source that fails two weeks in a row flags its facts for review. Sites that refuse scripts are recorded as blocked and never flag anything.
@@ -578,7 +675,7 @@ If any check fails, production is untouched and the problems are listed. Apps ke
 - **A place is gone or nothing about it holds up:** reject all its facts in review. A place with no published facts disappears from the app, but its id is never reused, so saved places don't break.
 - **Never edit the database by hand.** Every change goes through a command, so it's attributed to a run and kept in the history.
 
-## 16. Regional notes
+## 17. Regional notes
 
 ### Mainland China
 

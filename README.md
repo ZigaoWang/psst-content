@@ -18,7 +18,7 @@ Setup (the database password and SSH access) is in [CONTENT_GUIDE.md](CONTENT_GU
 
 ## Doing the work
 
-To do the work, open Claude Code in this folder and say what you want, for example `seed london`, `seed hong kong, 5 cells`, `photos london`, `review`, or `status`. [START.md](START.md) tells the session how; [CONTENT_GUIDE.md](CONTENT_GUIDE.md) is the rulebook it follows. The commands underneath:
+To do the work, open Claude Code in this folder and say what you want, for example `seed london`, `seed hong kong, 5 cells`, `photos london`, `guides london`, `review`, or `status`. [START.md](START.md) tells the session how; [CONTENT_GUIDE.md](CONTENT_GUIDE.md) is the rulebook it follows. The commands underneath:
 
 ```
 uv run psst city add "Hong Kong" --country HK       # set up a city (once)
@@ -28,11 +28,15 @@ uv run psst draft check work/<cell>/draft.json      # every rule a script can ch
 uv run psst draft submit work/<cell>/draft.json     # stored as drafts, never published directly
 uv run psst images find --city London              # freely licensed photo candidates, with previews
 uv run psst images submit work/images/draft.json    # our own copies, full credit, as drafts
+uv run psst guide prepare --city London            # identifiers, About, and Wikidata key facts to fill in
+uv run psst guide submit work/guides/<run>/draft.json
 # a separate review run:
 uv run psst review next --out work/review.json
 uv run psst review apply work/decisions.json
 uv run psst images next --out work/images/review.json
 uv run psst images apply work/images/decisions.json
+uv run psst guide next --out work/guides/review.json
+uv run psst guide apply work/guides/decisions.json
 # then:
 uv run psst publish                                 # export, stage, check, promote
 uv run psst bundle                                  # snapshot production into the app before a release

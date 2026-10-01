@@ -7,6 +7,7 @@ The person running you will say what to do in a few words, for example:
 - `seed shanghai around the bund, keep going until the Bund is done`
 - `seed london deeper` (more passes on the partly done cells with the most left, instead of new cells)
 - `photos london` (or `photos london, 20 places`)
+- `guides london` (guide information for places that don't have it yet)
 - `review`
 - `check the old content` (a quick spot check per city)
 - `verify london` (check every old story in a city, as cheaply as possible)
@@ -28,7 +29,7 @@ Default: depth before breadth. Stay in one cell until every lead marked WELL KNO
 2. Start one research run for the session: `uv run psst run start --kind research --model <your model id> --notes "<what you were asked>"`. It prints the run id. Pass it as `--run <id>` to every command that takes one; environment variables may not last from one command to the next.
 3. For each cell:
    - Claim one: `uv run psst research claim --city "<City>"`. Claiming prefers cells with the fewest research passes, so after a partial pass you get a different cell. In a dense cell this takes a few minutes (it sweeps Wikipedia and OpenStreetMap), so give the command up to 10 minutes. If they asked to go deeper, add `--deeper`: it picks the partly researched cell with the most leads left. If they named an area ("around the Bund"), find its coordinates (Wikidata, or a place already in Psst via `uv run psst places search`) and add `--near <lat>,<lon>`.
-   - Research it exactly as the guide says (section 5): account for every lead in the brief, add what the sweep can't see, write, tag, check, fix, submit. Read every source with `uv run psst fetch <url> --run <run id>` (guide, section 8): it gets past sites that refuse scripts by reading their Internet Archive copy, and records the read. `draft submit` refuses facts citing a source your run never opened.
+   - Research it exactly as the guide says (section 5): account for every lead in the brief, add what the sweep can't see, write, tag, give every new place its guide information (section 13), check, fix, submit. Read every source with `uv run psst fetch <url> --run <run id>` (guide, section 8): it gets past sites that refuse scripts by reading their Internet Archive copy, and records the read. `draft submit` refuses facts citing a source your run never opened.
    - Work efficiently: check claims with `uv run psst fetch <url> --run <run id> --find "<names, dates>"` rather than reading whole pages, start from the place's Wikipedia article and follow its references to a second source, and group skipped leads under one reason (`names`). In a big cell, submit every 15 places or so, so nothing is lost if the session ends, then keep going in the same cell with `uv run psst research claim --cell <cell>`: submitting releases the cell, and claiming it again brings back only the leads still open.
    - If the cell is too big to do well in what's left of your session, submit what's finished and leave the remaining leads with `"later": true`. Never rush facts to finish a cell.
 4. `uv run psst run finish <run id>`.
@@ -41,18 +42,29 @@ Default: everything waiting.
 1. Start a review run: `uv run psst run start --kind review --model <your model id> --notes "Review"`, and pass the id it prints as `--run <id>` to every command that takes one.
 2. Repeat until it returns no facts: `uv run psst review next --out work/review.json`, then review each fact as the guide says (section 12): open every source with `uv run psst fetch <url> --run <run id>` (approving is refused otherwise), check every claim against what the source says, and approve, edit, or reject with notes naming each source you checked. Write `work/decisions.json`, run `uv run psst review apply work/decisions.json --dry-run`, fix anything it reports, then apply.
    Reviewing means reading: never write a script that fetches sources in bulk, compares words, or approves decisions for you. A script can't tell whether a source says *who did what when*, and a review that approves hundreds of stories with the same note is undone and redone (`psst review reopen`). `review apply` refuses notes repeated across decisions and notes that don't name the story's source, so write one real line per story: which source confirmed which claim.
-3. If photos are waiting (`uv run psst images next --out work/images/review.json --run <run id>` lists them), review them too, as the guide says (section 13): look at every one with `uv run psst images show <id> --run <run id>` before deciding.
-4. Publish only once every fact and photo in the batch has been checked this way: `uv run psst publish`. Publishing first and fixing later puts mistakes in front of readers. If the staging check fails, report what it said; don't work around it.
-5. `uv run psst run finish <run id>`, and report how many facts and photos were approved, edited, and rejected, and what kinds of problems you found.
+3. If guide information is waiting (`uv run psst guide next --out work/guides/review.json --run <run id>` lists it), review it too, as the guide says (section 13): open at least one source per place, and confirm or drop every flagged key fact. Write `work/guides/decisions.json`, dry-run and apply with `uv run psst guide apply`. New places don't go live until their guide is approved.
+4. If photos are waiting (`uv run psst images next --out work/images/review.json --run <run id>` lists them), review them too, as the guide says (section 14): look at every one with `uv run psst images show <id> --run <run id>` before deciding.
+5. Publish only once every fact, guide, and photo in the batch has been checked this way: `uv run psst publish`. Publishing first and fixing later puts mistakes in front of readers. If the staging check fails, report what it said; don't work around it.
+6. `uv run psst run finish <run id>`, and report how many facts, guides, and photos were approved, edited, and rejected, and what kinds of problems you found.
 
 ## Add photos
 
-Default: 10 places, in the city named. The rules are in the guide, section 13.
+Default: 10 places, in the city named. The rules are in the guide, section 14.
 
 1. Start a research run, as above.
 2. `uv run psst images find --city "<City>" --limit <n>` (or `--place <id>` for one place). It picks places with published stories and no photo, the ones with the most stories first.
 3. For each place, read `work/images/<place id>/candidates.md` and open the previews you consider. Pick the best one or two that clearly show the place, or none if nothing does. Write `work/images/draft.json`, run `uv run psst images check work/images/draft.json`, fix what it reports, then `uv run psst images submit work/images/draft.json --run <run id>`.
 4. Finish the run, and report how many places got photos and how many had nothing usable.
+
+## Add guide information
+
+For places that have stories but no identifier, About, or key facts yet. Default: batches of 40, in the city named, until the session is nearly full. The rules are in the guide, section 13.
+
+1. Start a research run, as above.
+2. `uv run psst guide prepare --city "<City>" --limit 40 --run <run id>`. It claims the places and writes `work/guides/<run id>/brief.md` and `draft.json`.
+3. For each place, read its entry in the brief (key facts, the Wikipedia lead, its stories), and write `identifier` and `about` in `draft.json`. When there's no Wikipedia lead, open one of the stories' sources with `uv run psst fetch <url> --run <run id>` and cite it. Delete key facts that don't fit; remove an entry you can't do well.
+4. `uv run psst guide check work/guides/<run id>/draft.json --run <run id>`, fix what it reports, then `uv run psst guide submit ...` the same way. Take the next batch (`guide prepare` writes a fresh draft each time, so submit before preparing again).
+5. Finish the run, and report how many places got guide information, and how many key facts were flagged.
 
 ## Check the old content
 
@@ -78,7 +90,7 @@ For checking every migrated story in a city, not just a sample. These stories pa
 
 ## Status
 
-Run `uv run psst status`, `uv run psst city list`, `uv run psst research wanted`, and `uv run psst review progress`, and summarize in plain words: what's in the app, what's waiting for review, open reports, and where people have been looking. Everything is also on the admin page, https://psst.zigao.wang/admin/.
+Run `uv run psst status`, `uv run psst city list`, `uv run psst research wanted`, `uv run psst review progress`, and `uv run psst guide progress`, and summarize in plain words: what's in the app, what's waiting for review, open reports, and where people have been looking. Everything is also on the admin page, https://psst.zigao.wang/admin/.
 
 ## When something goes wrong
 
