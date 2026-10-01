@@ -34,6 +34,7 @@ class Export:
     places: int
     facts: int
     images: list[str] = field(default_factory=list)  # ids of every photo exported
+    guides: list[str] = field(default_factory=list)  # ids of every guide exported
 
 
 def _schema(name: str) -> dict:
@@ -55,9 +56,10 @@ def _names(rows, key_name="lang") -> dict[str, str]:
     return {r[key_name]: r["name"] for r in rows}
 
 
-def build(conn, out_root: Path, include: list[str] = (), include_images: list[str] = ()) -> Export:
-    """Export everything published, plus the facts in `include` and the images in `include_images` (reviewed
-    ones about to be published), into a new directory under out_root. Raises ExportError, and writes nothing usable, if any exported
+def build(conn, out_root: Path, include: list[str] = (), include_images: list[str] = (),
+          include_guides: list[str] = ()) -> Export:
+    """Export everything published, plus the facts in `include`, the images in `include_images`, and the guides
+    in `include_guides` (reviewed ones about to be published), into a new directory under out_root. Raises ExportError, and writes nothing usable, if any exported
     fact breaks the writing rules or any pack fails its schema."""
     facts = conn.execute("""
         SELECT f.id, f.place_id, f.category, f.veracity, f.headline, f.short, f.long, f.researched_at,
@@ -132,6 +134,42 @@ def build(conn, out_root: Path, include: list[str] = (), include_images: list[st
                        "title": i["title"]},
         })
 
+    # One guide per place: a reviewed one about to be published replaces the published one.
+    guides_by_place: dict[str, dict] = {}
+    for g in conn.execute("""
+            SELECT g.id, g.place_id, g.identifier, g.about, g.wikidata_id, g.last_verified_at,
+                   coalesce((SELECT json_agg(json_build_object('title', s.title, 'publisher', s.publisher, 'url', s.url)
+                                             ORDER BY gs.position)
+                             FROM guide_sources gs JOIN sources s ON s.id = gs.source_id WHERE gs.guide_id = g.id),
+                            '[]') AS sources,
+                   coalesce((SELECT json_agg(json_build_object('property', k.property, 'label', k.label,
+                                                               'value', k.value, 'valueId', k.value_id)
+                                             ORDER BY k.position)
+                             FROM guide_key_facts k WHERE k.guide_id = g.id AND (k.flag IS NULL OR k.flag_confirmed)),
+                            '[]') AS key_facts
+            FROM guides g WHERE g.place_id = ANY(%s)
+              AND (g.state = 'published' OR (g.state = 'reviewed' AND g.id = ANY(%s)))
+            ORDER BY g.place_id, g.state = 'reviewed', g.published_at, g.id""", (place_ids, list(include_guides))):
+        guides_by_place[g["place_id"]] = g
+    for g in guides_by_place.values():
+        rules.check_guide(report, g["id"], g)
+    if report.errors:
+        raise ExportError("Guides break the rules:\n  " + "\n  ".join(report.errors[:30]))
+
+    def guide_entry(g: dict) -> dict:
+        # Several values of one property are one line: "Material: Bronze, Granite".
+        key_facts: list[dict] = []
+        for k in g["key_facts"]:
+            if key_facts and key_facts[-1]["property"] == k["property"]:
+                key_facts[-1]["value"] += ", " + k["value"]
+                key_facts[-1]["values"].append({"value": k["value"], "id": k["valueId"]})
+            else:
+                key_facts.append({"property": k["property"], "label": k["label"], "value": k["value"],
+                                  "values": [{"value": k["value"], "id": k["valueId"]}]})
+        return {"id": g["id"], "identifier": g["identifier"], "about": g["about"], "sources": g["sources"],
+                "keyFacts": key_facts, "wikidataId": g["wikidata_id"],
+                "lastVerified": g["last_verified_at"].date().isoformat() if g["last_verified_at"] else None}
+
     by_group: dict[int, list[dict]] = {}
     area_ids: set[int] = set()
     for p in places:
@@ -145,6 +183,7 @@ def build(conn, out_root: Path, include: list[str] = (), include_images: list[st
             "neighborhoodId": str(p["neighborhood_id"]) if p["neighborhood_id"] else None,
             "facts": facts_by_place[p["id"]],
             **({"images": images_by_place[p["id"]]} if p["id"] in images_by_place else {}),
+            **({"guide": guide_entry(guides_by_place[p["id"]])} if p["id"] in guides_by_place else {}),
         })
 
     groups = conn.execute("""
@@ -206,7 +245,8 @@ def build(conn, out_root: Path, include: list[str] = (), include_images: list[st
     jsonschema.validate(manifest, _schema("manifest"))
     (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     exported_images = [i["id"] for p in places if p["id"] in images_by_place for i in images_by_place[p["id"]]]
-    return Export(directory, manifest, len(places), len(facts), exported_images)
+    return Export(directory, manifest, len(places), len(facts), exported_images,
+                  sorted(g["id"] for g in guides_by_place.values()))
 
 
 def load_pack(directory: Path, entry: dict) -> dict:

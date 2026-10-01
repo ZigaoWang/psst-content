@@ -342,10 +342,13 @@ def status_command(args) -> int:
         other = conn.execute("""SELECT (SELECT count(*) FROM places WHERE state = 'active') AS places,
                                        (SELECT count(*) FROM reports WHERE state = 'open') AS reports,
                                        (SELECT count(*) FROM tags) AS tags,
+                                       (SELECT count(*) FROM guides WHERE state = 'published') AS guides_live,
+                                       (SELECT count(*) FROM guides WHERE state IN ('draft', 'reviewed')) AS guides_waiting,
                                        (SELECT content_version FROM publications WHERE channel = 'production'
                                         ORDER BY id DESC LIMIT 1) AS live""").fetchone()
     print(f"Places: {other['places']}. Facts: " + ", ".join(f"{r['n']} {r['state']}" for r in facts)
-          + f". Flagged for review: {flagged['n']}. Open reports: {other['reports']}. Tags: {other['tags']}.")
+          + f". Flagged for review: {flagged['n']}. Open reports: {other['reports']}. Tags: {other['tags']}. "
+          f"Guides: {other['guides_live']} live, {other['guides_waiting']} waiting for review.")
     print(f"Production serves {other['live'] or 'nothing yet'}.")
     with db.connect() as conn:
         from . import research
@@ -376,8 +379,16 @@ def places_show(args) -> int:
             raise RuntimeError(f"No place {args.place}")
         facts = conn.execute("""SELECT id, state, category, veracity, headline, short FROM facts WHERE place_id = %s
                                 ORDER BY position""", (args.place,)).fetchall()
+        guide_rows = conn.execute("""SELECT g.id, g.state, g.identifier, g.about,
+                                        (SELECT string_agg(k.label || ' (' || k.property || '): ' || k.value, '; '
+                                                           ORDER BY k.position)
+                                         FROM guide_key_facts k WHERE k.guide_id = g.id) AS key_facts
+                                    FROM guides g WHERE g.place_id = %s AND g.state <> 'retired'
+                                    ORDER BY g.created_at""", (args.place,)).fetchall()
     print(f"{place['id']}  {place['names']}\n{place['kind']} at {place['lat']}, {place['lon']} ({place['coord_source_ref']}), "
           f"{place['neighborhood'] or '-'}, {place['city'] or '-'}, cell {place['h3_cell']}\n")
+    for g in guide_rows:
+        print(f"{g['id']}  [{g['state']}] guide: {g['identifier']}\n    {g['about']}\n    {g['key_facts'] or 'No key facts.'}\n")
     for f in facts:
         print(f"{f['id']}  [{f['state']}] {f['category']}, {f['veracity']}: {f['headline']}\n    {f['short']}")
     return 0
@@ -601,7 +612,7 @@ def draft_submit(args) -> int:
         counts = research.submit(conn, draft, run, checked)
     for warning in checked.report.warnings:
         print(f"  warning  {warning}")
-    print(f"Stored {counts['places']} new places, {counts['facts']} draft facts, {counts['sources']} new sources "
+    print(f"Stored {counts['places']} new places with their guides, {counts['facts']} draft facts, {counts['sources']} new sources "
           f"for {draft['cell']}." + (f" {counts['leads_left']} leads left for the next pass; the cell stays open."
                                       if counts["leads_left"] else ""))
     if counts["new_place_ids"]:
@@ -1009,12 +1020,124 @@ def images_retire(args) -> int:
     return 0
 
 
+# Guides ------------------------------------------------------------------------------------------------
+
+GUIDE_WORK = ROOT / "work" / "guides"
+
+
+@command("guide prepare", "Claim places that need guide information and write a brief and a draft to fill in.",
+         arg("--city", help="places in this city (English name)"), arg("--cell", help="places in this research cell"),
+         arg("--place", action="append", help="one place (repeatable)"),
+         arg("--limit", type=int, default=40, help="how many places (default 40)"), RUN_ARG)
+def guide_prepare(args) -> int:
+    from . import guides, runs
+    with db.connect(actor="research", run=args.run) as conn:
+        runs.require(conn, args.run, "research")
+        places = guides.claim(conn, args.run, args.limit, args.city, args.cell, args.place)
+    if not places:
+        print("No places need guide information there.")
+        return 0
+    print(f"Claimed {len(places)} places. Reading Wikidata and Wikipedia...")
+    with db.connect() as conn:
+        gathered = guides.gather(conn, places)
+    with db.connect() as conn:
+        guides.record_reads(conn, args.run, gathered)
+    brief, draft = guides.write_work(gathered, GUIDE_WORK / args.run)
+    flagged = sum(1 for p in gathered for k in p["keyFacts"] if k.get("flag"))
+    print(f"Brief: {brief}\nDraft: {draft} ({sum(len(p['keyFacts']) for p in gathered)} key facts, {flagged} flagged; "
+          f"{sum(1 for p in gathered if p['wikipedia'])} places with a Wikipedia lead).")
+    return 0
+
+
+@command("guide check", "Check a guide draft: writing rules, sources, and key facts against Wikidata.",
+         arg("file"), arg("--offline", action="store_true", help="skip the Wikidata lookups"), RUN_ARG)
+def guide_check(args) -> int:
+    from . import guides
+    entries = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    with db.connect() as conn:
+        report, _ = guides.check(conn, entries, args.run, online=not args.offline)
+    _print_report(report, args.file)
+    return 0 if report.ok else 1
+
+
+@command("guide submit", "Store a checked guide draft. Everything is saved as a draft for review.",
+         arg("file"), RUN_ARG)
+def guide_submit(args) -> int:
+    from . import guides, runs
+    entries = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    with db.connect(actor="research", run=args.run, note="Guide written in research.") as conn:
+        run = runs.require(conn, args.run, "research")
+        report, fresh = guides.check(conn, entries, args.run)
+        if not report.ok:
+            _print_report(report, args.file)
+            return 1
+        stored = guides.submit(conn, entries, run, fresh)
+    for warning in report.warnings:
+        print(f"  warning  {warning}")
+    print(f"Stored {len(stored)} guides as drafts for review.")
+    return 0
+
+
+@command("guide next", "Write the next guides to review (flagged ones first, then drafts) to a file.",
+         arg("--out", required=True), arg("--limit", type=int, default=40),
+         arg("--city", help="only this city (English name)"), RUN_ARG)
+def guide_next(args) -> int:
+    from . import guides, runs
+    with db.connect() as conn:
+        runs.require(conn, args.run, "review")
+        rows = guides.queue(conn, args.limit, args.run, args.city)
+        waiting = conn.execute("SELECT count(*) FILTER (WHERE state = 'draft') AS drafts, "
+                               "count(*) FILTER (WHERE needs_review AND state <> 'retired') AS flagged FROM guides").fetchone()
+    Path(args.out).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"Wrote {len(rows)} guides to {args.out}. Waiting overall: {waiting['drafts']} drafts, "
+          f"{waiting['flagged']} flagged.")
+    return 0
+
+
+@command("guide apply", "Apply guide review decisions from a JSON file (see CONTENT_GUIDE.md, section 13).",
+         arg("file"), arg("--dry-run", action="store_true", help="only check the decisions"), RUN_ARG)
+def guide_apply(args) -> int:
+    from . import guides, runs
+    decisions = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    with db.connect(actor="review", run=args.run, note="Guide review decision.") as conn:
+        run = runs.require(conn, args.run, "review")
+        report = guides.check_decisions(conn, decisions, run)
+        if not report.ok or args.dry_run:
+            _print_report(report, args.file)
+            return 0 if report.ok else 1
+        counts = guides.apply_decisions(conn, decisions, run)
+    print(f"Approved {counts['approve']}, edited {counts['edit']}, rejected {counts['reject']}. psst publish shows them.")
+    return 0
+
+
+@command("guide flag", "Send a published guide back for review.", arg("guide"),
+         arg("--reason", required=True, help="what looks wrong (kept in the guide's history)"))
+def guide_flag(args) -> int:
+    with db.connect(actor="review", note=f"Flagged: {args.reason}") as conn:
+        row = conn.execute("UPDATE guides SET needs_review = true WHERE id = %s AND state <> 'retired' RETURNING id",
+                           (args.guide,)).fetchone()
+    if not row:
+        raise RuntimeError(f"No live guide {args.guide}")
+    print(f"Flagged {args.guide}. It stays up until a review decides; psst guide next lists it first.")
+    return 0
+
+
+@command("guide progress", "How many places with stories have guide information, per city.")
+def guide_progress(args) -> int:
+    from . import guides
+    with db.connect() as conn:
+        rows = guides.progress(conn)
+    for r in rows:
+        print(f"{r['city']:<16} {r['live']:>5} of {r['places']:>5} places live, {r['waiting']:>5} waiting for review")
+    return 0
+
+
 # Publishing ------------------------------------------------------------------------------------------
 
-@command("publish", "Publish reviewed facts: export, stage, check staging, promote to production.",
+@command("publish", "Publish reviewed facts, photos, and guides: export, stage, check staging, promote to production.",
          arg("--allow-shrink", metavar="REASON", help="allow places or facts to drop by more than 2 percent"),
          arg("--only-staging", action="store_true", help="stop after checking staging"),
-         arg("--no-new-facts", action="store_true", help="re-export what's published without publishing reviewed facts"))
+         arg("--no-new-facts", action="store_true", help="re-export what's published without publishing reviewed facts, photos, or guides"))
 def publish_command(args) -> int:
     db.require_server_access("Publishing")
     from . import export, publish, runs
@@ -1026,9 +1149,22 @@ def publish_command(args) -> int:
             "SELECT id FROM facts WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
         reviewed_images = [] if args.no_new_facts else [r["id"] for r in conn.execute(
             "SELECT id FROM images WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
-        result = export.build(conn, ROOT / "export", include=reviewed, include_images=reviewed_images)
-    print(f"Exported {result.places} places, {result.facts} facts ({len(reviewed)} newly published), and "
-          f"{len(result.images)} photos as {result.manifest['contentVersion']}.")
+        reviewed_guides = [] if args.no_new_facts else [r["id"] for r in conn.execute(
+            "SELECT id FROM guides WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
+        # A place goes live only with its guide: stories for a place that isn't live yet wait until its
+        # guide is reviewed too.
+        waiting = {r["id"] for r in conn.execute("""
+            SELECT f.id FROM facts f WHERE f.id = ANY(%s)
+              AND NOT EXISTS (SELECT 1 FROM facts o WHERE o.place_id = f.place_id AND o.state = 'published')
+              AND NOT EXISTS (SELECT 1 FROM guides g WHERE g.place_id = f.place_id
+                              AND (g.state = 'published' OR g.id = ANY(%s)))""", (reviewed, reviewed_guides))}
+        if waiting:
+            print(f"{len(waiting)} reviewed stories wait for their place's guide to be reviewed (psst guide next).")
+            reviewed = [f for f in reviewed if f not in waiting]
+        result = export.build(conn, ROOT / "export", include=reviewed, include_images=reviewed_images,
+                              include_guides=reviewed_guides)
+    print(f"Exported {result.places} places, {result.facts} facts ({len(reviewed)} newly published), "
+          f"{len(result.images)} photos, and {len(result.guides)} guides as {result.manifest['contentVersion']}.")
     publish.upload_staging(config["host"], result.directory)
     print(f"Uploaded to staging. Checking {config['url']}/content/staging/ ...")
     problems = publish.check_staging(config["url"], args.allow_shrink)
@@ -1052,6 +1188,11 @@ def publish_command(args) -> int:
         # A reviewed photo of a place with no published story yet waits for the next publish.
         conn.execute("UPDATE images SET state = 'published', published_at = now() "
                      "WHERE id = ANY(%s) AND state = 'reviewed'", (result.images,))
+        # Likewise a reviewed guide for a place with no published story yet.
+        conn.execute("UPDATE guides SET state = 'published', published_at = now() "
+                     "WHERE id = ANY(%s) AND state = 'reviewed'", (result.guides,))
+        from . import guides
+        guides.retire_replaced(conn, result.guides)
         conn.execute("INSERT INTO publications (channel, content_version, manifest, places, facts, run_id) "
                      "VALUES ('production', %s, %s, %s, %s, %s)",
                      (manifest["contentVersion"], json.dumps(manifest), result.places, result.facts, run))

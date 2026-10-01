@@ -68,6 +68,52 @@
               }
             }
           },
+          "guide": {
+            "type": "object",
+            "description": "Optional practical information, kept apart from the stories: a one-line identifier, a short neutral About with its sources, and key facts from Wikidata, each with the property it came from. Older apps ignore it.",
+            "required": ["id", "identifier", "about", "sources", "keyFacts"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^gd_[0-9a-hjkmnp-tv-z]{10}$"},
+              "identifier": {"type": "string", "minLength": 3, "maxLength": 70},
+              "about": {"type": "string", "minLength": 100, "maxLength": 700},
+              "wikidataId": {"type": ["string", "null"], "pattern": "^Q[1-9][0-9]*$"},
+              "lastVerified": {"type": ["string", "null"]},
+              "sources": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["title", "publisher", "url"],
+                  "properties": {
+                    "title": {"type": "string"},
+                    "publisher": {"type": "string"},
+                    "url": {"type": "string", "pattern": "^https://"}
+                  }
+                }
+              },
+              "keyFacts": {
+                "type": "array",
+                "description": "In display order. `label` is English; apps translate it by `property`.",
+                "items": {
+                  "type": "object",
+                  "required": ["property", "label", "value"],
+                  "properties": {
+                    "property": {"type": "string", "pattern": "^P[1-9][0-9]*$"},
+                    "label": {"type": "string", "minLength": 1},
+                    "value": {"type": "string", "minLength": 1},
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["value"],
+                        "properties": {"value": {"type": "string"}, "id": {"type": ["string", "null"]}}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "facts": {
             "type": "array",
             "minItems": 1,
