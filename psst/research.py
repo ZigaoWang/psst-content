@@ -640,7 +640,8 @@ def submit(conn, draft: dict, run: dict, checked: Checked, online: bool = True) 
     tags.assign_many(conn, fact_tags)
     # Every new place comes with its guide, with key facts read from Wikidata now.
     found = guides.key_facts_for([{"id": place_id, "wikidata_id": entry.get("wikidata"), "kind": entry["kind"],
-                                   "size": entry.get("size")} for place_id, entry in new_guides]) if online else {}
+                                   "size": entry.get("size"), "name": entry["name"]}
+                                  for place_id, entry in new_guides]) if online else {}
     for place_id, entry in new_guides:
         guides.store(conn, place_id, entry["guide"], run, found.get(place_id, []))
     counts["guides"] = len(new_guides)

@@ -45,8 +45,6 @@ PROPERTIES: list[tuple[str, str, str]] = [
     ("P547", "Commemorates", "item"),
     ("P825", "Dedicated to", "item"),
     ("P138", "Named after", "item"),
-    ("P140", "Religion", "item"),
-    ("P137", "Operator", "item"),
     ("P1435", "Heritage status", "item"),
 ]
 PROPERTY = {p: (label, kind) for p, label, kind in PROPERTIES}
@@ -187,6 +185,9 @@ def wikidata_items(qids: list[str]) -> tuple[dict[str, dict], dict[str, dict]]:
                 target = claim["mainsnak"]["datavalue"]["value"].get("id")
                 if target:
                     (checked if kind == "person" or prop == "P149" else others).add(target)
+    for entity in places.values():
+        # What the place is (P31), for the suggested identifier.
+        others.update(c["mainsnak"]["datavalue"]["value"]["id"] for c in _claims(entity, "P31")[:1])
     values = net.wikidata_entities(sorted(checked), props="labels|claims")
     values.update(net.wikidata_entities(sorted(others - checked), props="labels"))
     return places, values
@@ -274,6 +275,32 @@ def _classes(entity: dict, prop: str = "P31") -> set[str]:
     """What an item is an instance of (P31), or with P279, a subclass of."""
     return {c["mainsnak"].get("datavalue", {}).get("value", {}).get("id")
             for c in entity.get("claims", {}).get(prop, [])} - {None}
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", text.lower())) - {"the", "of", "and", "a"}
+
+
+def drop_echoes(found: list[KeyFact], name: str) -> list[KeyFact]:
+    """"Named after: Belsize Park" on Belsize Park station says nothing; leave it out."""
+    return [k for k in found if not (k.property == "P138" and _words(k.value) <= _words(name))]
+
+
+def suggest_identifier(entity: dict, values: dict[str, dict], found: list[KeyFact]) -> str:
+    """A starting point in the standard shape, "[style] <what it is>, <year>[, by <maker>]", from Wikidata's
+    unflagged values. The writer checks and rewrites it; empty when Wikidata doesn't say what the place is."""
+    kind = next((_label(values.get(c["mainsnak"]["datavalue"]["value"]["id"])) for c in _claims(entity, "P31")[:1]), None)
+    if not kind:
+        return ""
+    clean = [k for k in found if not k.flag]
+    style = next((k.value for k in clean if k.property == "P149"), None)
+    year = next((re.sub(r"^.*?(\d{3,4}s?|\d+\w\w century)( BC)?$", r"\1\2", k.value)
+                 for p in ("P571", "P1619") for k in clean if k.property == p), None)
+    maker = next((k.value for p in ("P170", "P84") for k in clean if k.property == p), None)
+    text = (f"{style} {kind.lower()}" if style else kind[0].upper() + kind[1:])
+    text += f", {year}" if year else ""
+    text += f", by {maker}" if maker else ""
+    return text if len(text) <= rules.IDENTIFIER_MAX else ""
 
 
 def wikipedia_page(entity: dict, country: str | None) -> dict | None:
@@ -376,7 +403,9 @@ def gather(conn, places: list[dict]) -> list[dict]:
         page = pages.get(p["id"])
         if page:
             page = {**page, "intro": intros.get((page["lang"], page["title"]), "")}
-        out.append({**p, "keyFacts": [k.as_dict() for k in key_facts(entity, values, p["kind"], p["size"])] if entity else [],
+        found = drop_echoes(key_facts(entity, values, p["kind"], p["size"]), p["name"]) if entity else []
+        out.append({**p, "keyFacts": [k.as_dict() for k in found],
+                    "suggestion": suggest_identifier(entity, values, found) if entity else "",
                     "wikipedia": page, "stories": by_place.get(p["id"], [])})
     return out
 
@@ -395,6 +424,8 @@ def write_work(gathered: list[dict], directory: Path) -> tuple[Path, Path]:
                   f"{p['kind']}, {p['size']}, {p['neighborhood'] or '-'}, {p['city'] or '-'}"
                   + (f", https://www.wikidata.org/wiki/{p['wikidata_id']}" if p["wikidata_id"] else "")
                   + (f", https://www.openstreetmap.org/{p['osm_ref']}" if p["osm_ref"] else ""), ""]
+        if p["suggestion"]:
+            lines += [f"Suggested identifier (from Wikidata; check and rewrite it): {p['suggestion']}", ""]
         if p["keyFacts"]:
             lines.append("Key facts from Wikidata:")
             for k in p["keyFacts"]:
@@ -412,7 +443,7 @@ def write_work(gathered: list[dict], directory: Path) -> tuple[Path, Path]:
         if p["wikipedia"]:
             sources.append({"url": p["wikipedia"]["url"], "title": p["wikipedia"]["title"],
                             "publisher": "Wikipedia" if p["wikipedia"]["lang"] == "en" else f"Wikipedia ({p['wikipedia']['lang']})"})
-        draft.append({"place": p["id"], "name": p["name"], "identifier": "", "about": "", "sources": sources,
+        draft.append({"place": p["id"], "name": p["name"], "identifier": p["suggestion"], "about": "", "sources": sources,
                       "keyFacts": [{"property": k["property"], "value": k["value"]} for k in p["keyFacts"]]})
     brief = directory / "brief.md"
     brief.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -556,7 +587,8 @@ def key_facts_for(places: list[dict]) -> dict[str, list[KeyFact]]:
     if not qids:
         return {}
     entities, values = wikidata_items(qids)
-    return {p["id"]: key_facts(entities.get(p["wikidata_id"], {}), values, p["kind"], p.get("size") or "medium")
+    return {p["id"]: drop_echoes(key_facts(entities.get(p["wikidata_id"], {}), values, p["kind"], p.get("size") or "medium"),
+                                 p.get("name", ""))
             for p in places if p.get("wikidata_id")}
 
 

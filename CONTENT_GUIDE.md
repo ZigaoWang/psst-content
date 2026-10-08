@@ -466,10 +466,43 @@ Stories are the surprise. Guide information is the plain answer to "what am I lo
 
 ### What it has
 
-- **Identifier:** one line naming what the place is, up to 70 characters, shown on feed cards and at the top of the place page. Kind, material, date, maker, in that order of usefulness: "Bronze statue, 1843, by Edward Baily", "Underground station, 1907, by Leslie Green", "Victorian pub, rebuilt 1890s", "Art Deco cinema, now a supermarket". Not a sentence (no final period), not the name again, nothing you'd have to look up.
+- **Identifier:** one line naming what the place is, up to 70 characters, shown on feed cards and under the name on the place page. It always has the same shape (see "The standard shape" below).
 - **About:** two or three sentences, 100 to 700 characters: what the place is, why it's there, and why it matters. Its sources, like a story's.
 - **Key facts:** values from the place's Wikidata item, shown as an info box (creator, architect, date built or opened, style, height, material, what it commemorates, heritage status, and similar). The tools read them, never you, and each keeps the Wikidata property it came from.
 - **Visitor information** (opening hours, website, phone) comes from Apple Maps in the app, live, when someone opens the place. It's never stored in the database, so there's nothing to write or check.
+
+### The standard shape
+
+Every identifier reads the same way, so a reader learns the pattern once:
+
+**[style or material] <what it is>, <year>[, by <maker>]**
+
+| place | identifier |
+| --- | --- |
+| statue | Bronze statue, 1843, by Edward Baily |
+| station | Underground station, 1907, by Leslie Green |
+| church | Gothic Revival parish church, 1844, by Scott and Moffatt |
+| pub | Victorian pub, 1868 |
+| changed use | Former public baths, 1895, now a gym |
+| no known date | Chalk grassland nature reserve |
+
+- **What it is:** the plain noun a sign would use (pub, parish church, office tower, war memorial), with a style or material in front when it says something (Art Deco, Portland stone).
+- **Year:** one year, when it was completed or opened. "About 1773", "1840s", or "17th century" when that's all that's known. Leave it out rather than guess.
+- **Maker:** the architect, sculptor, or engineer, at most two names. Leave it out when unknown.
+- **Former uses:** "Former <what it was>, <year>, now <what it is>".
+- **Never:** the street or area (the line below says where), the heritage grade (it's a key fact), a story detail ("burgled in 1971"), or the name again. The checks refuse heritage grades and street names, and warn on year ranges.
+
+`psst guide prepare` suggests an identifier in this shape from Wikidata (what the item is, its style, date, and maker). It's a starting point: check it against the sources and rewrite it, especially the noun, which Wikidata often gets too generic ("building") or British ("theatre").
+
+### The standard About
+
+Three sentences, in this order, 250 to 450 characters as a rule:
+
+1. **What and where it was built for:** what the place is, and why it was built or put there.
+2. **What happened since, or why it matters:** the one or two facts that explain its place in the city.
+3. **What it is today** (optional): current use, owner, or whether it's open.
+
+Don't restate the info box line by line: the heritage grade, height, and materials are already there. Mention one only when the sentence needs it.
 
 ### Writing the About
 
@@ -492,7 +525,7 @@ The About has its own rules, different from a story's:
 - an architect or creator born after the place was built, or who died long before it;
 - a "style" that isn't recorded on Wikidata as a style (vandalism looks like this).
 
-Delete a key fact from the draft if it doesn't fit (a "named after" that only repeats the name); you can't add or change one. If Wikidata itself is wrong, leave the value out and, if you like, fix Wikidata separately.
+Key facts that add nothing are left out by the tools: a "named after" that only repeats the place's name. Religion and operator aren't shown at all (the identifier says "church", and operators change). Delete any other key fact that doesn't fit; you can't add or change one. If Wikidata itself is wrong, leave the value out and, if you like, fix Wikidata separately.
 
 ### Adding guide information
 

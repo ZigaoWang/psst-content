@@ -101,15 +101,15 @@ def test_key_facts_come_with_their_property():
 
 def test_ended_deprecated_and_unknown_values_are_left_out():
     entity = {"claims": {
-        "P137": [claim("P137", {"id": "Q1"}, qualifiers={"P582": [{"datavalue": {"value": year(1990)}}]}),
-                 claim("P137", {"id": "Q2"})],
+        "P88": [claim("P88", {"id": "Q1"}, qualifiers={"P582": [{"datavalue": {"value": year(1990)}}]}),
+                claim("P88", {"id": "Q2"})],
         "P571": [claim("P571", year(1700), rank="deprecated"), claim("P571", year(1843))],
         "P2048": [claim("P2048", {"amount": "+12", "unit": "http://www.wikidata.org/entity/Q99999"})],
         "P84": [claim("P84", {"id": "Q3"})]}}
     values = {"Q1": {"labels": {"en": {"value": "Old Company"}}}, "Q2": {"labels": {"en": {"value": "New Company"}}},
               "Q3": {"labels": {"zh": {"value": "某人"}}}}
     facts = {k.property: k.value for k in guides.key_facts(entity, values, "building", "medium", date(2026, 10, 1))}
-    assert facts == {"P137": "New Company", "P571": "1843"}
+    assert facts == {"P88": "New Company", "P571": "1843"}
 
 
 def test_implausible_values_are_flagged():
@@ -266,3 +266,22 @@ def test_another_runs_claim_is_respected(scratch, place):
     second = start(scratch, "research", "test-writer")
     assert guides.claim(scratch, second["id"], 5, places=[place]) == []
     assert any("another run" in e for e in guides.check(scratch, [entry(place)], second["id"], online=False)[0].errors)
+
+
+def test_identifiers_keep_one_shape():
+    assert any("heritage" in e for e in guide_report(identifier="Grade II listed Victorian pub").errors)
+    assert any("street" in e for e in guide_report(identifier="Victorian pub on Chalcot Road, 1868").errors)
+    assert any("range" in w for w in guide_report(identifier="Doric column, 1671 to 1677, by Christopher Wren").warnings)
+    assert guide_report(identifier="Gothic Revival parish church, 1844, by Scott and Moffatt").ok
+
+
+def test_suggested_identifier_and_echoes():
+    entity = item({"P31": {"id": "Q9"}, "P149": {"id": "Q2"}, "P571": year(1701), "P84": {"id": "Q1"},
+                   "P138": {"id": "Q3"}})
+    values = {"Q9": {"labels": {"en": {"value": "synagogue"}}},
+              "Q2": {"labels": {"en": {"value": "Neoclassical architecture"}}, "claims": {"P31": [claim("P31", {"id": "Q32880"})]}},
+              "Q1": person("Joseph Avis", 1650), "Q3": {"labels": {"en": {"value": "Bevis Marks"}}}}
+    found = guides.drop_echoes(guides.key_facts(entity, values, "worship", "medium", date(2026, 10, 1)),
+                               "Bevis Marks Synagogue")
+    assert "P138" not in [k.property for k in found]
+    assert guides.suggest_identifier(entity, values, found) == "Neoclassical synagogue, 1701, by Joseph Avis"

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import jsonschema
 
-from . import rules, tags
+from . import guides, rules, tags
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS = ROOT / "format" / "v2"
@@ -145,11 +145,13 @@ def build(conn, out_root: Path, include: list[str] = (), include_images: list[st
                    coalesce((SELECT json_agg(json_build_object('property', k.property, 'label', k.label,
                                                                'value', k.value, 'valueId', k.value_id)
                                              ORDER BY k.position)
-                             FROM guide_key_facts k WHERE k.guide_id = g.id AND (k.flag IS NULL OR k.flag_confirmed)),
+                             FROM guide_key_facts k WHERE k.guide_id = g.id AND (k.flag IS NULL OR k.flag_confirmed)
+                               AND k.property = ANY(%s)),
                             '[]') AS key_facts
             FROM guides g WHERE g.place_id = ANY(%s)
               AND (g.state = 'published' OR (g.state = 'reviewed' AND g.id = ANY(%s)))
-            ORDER BY g.place_id, g.state = 'reviewed', g.published_at, g.id""", (place_ids, list(include_guides))):
+            ORDER BY g.place_id, g.state = 'reviewed', g.published_at, g.id""",
+                          (list(guides.PROPERTY), place_ids, list(include_guides))):
         guides_by_place[g["place_id"]] = g
     for g in guides_by_place.values():
         rules.check_guide(report, g["id"], g)

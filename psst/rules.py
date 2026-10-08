@@ -326,6 +326,14 @@ def check_guide(report: Report, where: str, guide: dict) -> None:
             report.error(where, "identifier starts with a capital letter")
         check_prose(report, where, "identifier", identifier)
         _check_neutral(report, f"{where}.identifier", identifier)
+        # One shape everywhere: "[style or material] <what it is>, <year>[, by <maker>]" (CONTENT_GUIDE.md, 13).
+        if re.search(r"\bGrade (I|II)|\blisted\b|\b(declared|scheduled) monument", identifier, re.I):
+            report.error(where, "identifier repeats the heritage status; that's a key fact")
+        if re.search(r"\b(on|in|off|at|near) (the )?[A-Z][a-z]+ (Street|Road|Lane|Avenue|Square|Place|Hill|Row|Court|Way)\b",
+                     identifier):
+            report.error(where, "identifier names the street; the place page already says where it is")
+        if re.search(r"\b\d{4} to \d{4}\b", identifier):
+            report.warn(where, "identifier gives a range; use the year it was completed or opened")
     if not is_nonempty_string(about):
         report.error(where, "about must be a non-empty string")
     else:
