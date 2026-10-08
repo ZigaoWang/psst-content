@@ -367,11 +367,14 @@ def claim(conn, run_id: str, limit: int, city: str | None = None, cell: str | No
     """Places with stories and no guide, claimed for this run so no other session writes the same ones."""
     rows = conn.execute(PLACES_NEEDING_GUIDES, {"run": run_id, "city": city, "cell": cell, "places": places,
                                                 "limit": limit}).fetchall()
-    conn.execute("""INSERT INTO guide_claims (place_id, run_id, claimed_until)
-                    SELECT unnest(%s::text[]), %s, now() + make_interval(hours => %s)
-                    ON CONFLICT (place_id) DO UPDATE SET run_id = EXCLUDED.run_id,
-                        claimed_until = EXCLUDED.claimed_until""", ([r["id"] for r in rows], run_id, CLAIM_HOURS))
-    return rows
+    # Two sessions can pick the same places at once; only the one whose claim lands keeps each place.
+    claimed = {r["place_id"] for r in conn.execute("""
+        INSERT INTO guide_claims (place_id, run_id, claimed_until)
+        SELECT unnest(%s::text[]), %s, now() + make_interval(hours => %s)
+        ON CONFLICT (place_id) DO UPDATE SET run_id = EXCLUDED.run_id, claimed_until = EXCLUDED.claimed_until
+        WHERE guide_claims.claimed_until < now() OR guide_claims.run_id = EXCLUDED.run_id
+        RETURNING place_id""", ([r["id"] for r in rows], run_id, CLAIM_HOURS))}
+    return [r for r in rows if r["id"] in claimed]
 
 
 def stories(conn, place_ids: list[str]) -> dict[str, list[dict]]:
@@ -644,6 +647,8 @@ def check_decisions(conn, decisions: object, run: dict) -> rules.Report:
         report.error("decisions", "must be a list")
         return report
     guide_ids = [d.get("guide") for d in decisions if isinstance(d, dict)]
+    # Locked, so a second reviewer deciding the same guides waits and then sees they're already decided.
+    conn.execute("SELECT id FROM guides WHERE id = ANY(%s) FOR UPDATE", (guide_ids,))
     guides = {g["id"]: g for g in _guide_rows(conn, "g.id = ANY(%(ids)s)", {"ids": guide_ids})}
     read = {r["url_key"] for r in conn.execute("SELECT url_key FROM source_reads WHERE run_id = %s", (run["id"],))}
     note_counts: dict[str, int] = {}

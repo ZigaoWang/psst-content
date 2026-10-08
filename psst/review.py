@@ -107,7 +107,7 @@ def check(conn, decisions: list[dict], run: dict) -> rules.Report:
                (SELECT coalesce(json_agg(json_build_object('url', s.url, 'title', s.title, 'publisher', s.publisher)
                                          ORDER BY fs.position), '[]')
                 FROM fact_sources fs JOIN sources s ON s.id = fs.source_id WHERE fs.fact_id = f.id) AS source_list
-        FROM facts f WHERE f.id = ANY(%s)""", (fact_ids,))}
+        FROM facts f WHERE f.id = ANY(%s) FOR UPDATE OF f""", (fact_ids,))}
     known_tags = {r["id"] for r in conn.execute("SELECT id FROM tags")}
     read = {r["url_key"] for r in conn.execute("SELECT url_key FROM source_reads WHERE run_id = %s", (run["id"],))}
     seen = set()

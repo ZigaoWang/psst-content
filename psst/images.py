@@ -468,13 +468,26 @@ def show(conn, base_url: str, run: dict, image_id: str, work: Path) -> Path:
     return path
 
 
-def check_decisions(conn, decisions: dict, run: dict) -> rules.Report:
+def as_mapping(decisions) -> dict:
+    """Photo decisions as {id: decision}; the list form ([{"image": id, ...}]) used by facts and guides works too."""
+    if isinstance(decisions, list):
+        return {d.get("image"): d for d in decisions if isinstance(d, dict)}
+    if isinstance(decisions, dict):
+        return decisions
+    raise ValueError("decisions must be a list of decisions or an object keyed by photo id")
+
+
+def check_decisions(conn, decisions, run: dict) -> rules.Report:
     report = rules.Report()
+    decisions = as_mapping(decisions)
     for image_id, d in decisions.items():
-        row = conn.execute("SELECT state, kind, year, needs_review FROM images WHERE id = %s", (image_id,)).fetchone()
+        row = conn.execute("SELECT state, kind, year, needs_review, added_run FROM images WHERE id = %s FOR UPDATE",
+                           (image_id,)).fetchone()
         if not row:
             report.error(image_id, "no such image")
             continue
+        if row["added_run"] == run["id"]:
+            report.error(image_id, "a run can't review the photos it added")
         if row["state"] == "retired":
             report.error(image_id, "already retired")
         decision = d.get("decision")
@@ -498,9 +511,9 @@ def check_decisions(conn, decisions: dict, run: dict) -> rules.Report:
     return report
 
 
-def apply_decisions(conn, decisions: dict, run: dict) -> dict[str, int]:
+def apply_decisions(conn, decisions, run: dict) -> dict[str, int]:
     counts = {"approve": 0, "edit": 0, "reject": 0}
-    for image_id, d in decisions.items():
+    for image_id, d in as_mapping(decisions).items():
         decision = d["decision"]
         counts[decision] += 1
         if decision == "reject":

@@ -183,11 +183,27 @@ def claim(conn, run_id: str, cell: str | None = None, city_id: int | None = None
                        key=lambda c: h3.great_circle_distance(h3.cell_to_latlng(c), near))
         else:
             cell = min((r["cell"] for r in open_cells), key=priority)
+        # Another session may have taken it since the list was read; then take the next best one.
+        ranked = [cell] + sorted((r["cell"] for r in open_cells if r["cell"] != cell), key=priority)
+        cell = next((c for c in ranked if _take(conn, c, run_id)), None)
+        if cell is None:
+            raise RuntimeError("Every open cell was claimed while choosing; try again.")
+        conn.execute("UPDATE pipeline_runs SET cell = %s WHERE id = %s", (cell, run_id))
+        return conn.execute(CELL_STATS + " WHERE rc.cell = %s", (cell,)).fetchone()
     conn.execute("""UPDATE research_cells SET state = 'claimed', claimed_by_run = %s,
                     claimed_until = now() + make_interval(hours => %s) WHERE cell = %s""",
                  (run_id, CLAIM_HOURS, cell))
     conn.execute("UPDATE pipeline_runs SET cell = %s WHERE id = %s", (cell, run_id))
     return conn.execute(CELL_STATS + " WHERE rc.cell = %s", (cell,)).fetchone()
+
+
+def _take(conn, cell: str, run_id: str) -> bool:
+    """Claim a cell only if it's still free (or already ours)."""
+    return conn.execute("""UPDATE research_cells SET state = 'claimed', claimed_by_run = %s,
+                               claimed_until = now() + make_interval(hours => %s)
+                           WHERE cell = %s AND (state = 'open' OR claimed_by_run = %s
+                                                OR (state = 'claimed' AND claimed_until < now()))
+                           RETURNING cell""", (run_id, CLAIM_HOURS, cell, run_id)).fetchone() is not None
 
 
 def city_middles(qids: set[str]) -> dict[str, tuple[float, float]]:
