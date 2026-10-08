@@ -89,7 +89,28 @@ def build(conn) -> dict:
                (SELECT count(*) FROM facts WHERE review_run = r.id) AS facts_reviewed,
                (SELECT count(*) FROM places WHERE created_by_run = r.id) AS places_added,
                (SELECT count(*) FROM images WHERE added_run = r.id) AS photos_added,
-               (SELECT count(*) FROM images WHERE review_run = r.id) AS photos_reviewed
+               (SELECT count(*) FROM images WHERE review_run = r.id) AS photos_reviewed,
+               (SELECT count(*) FROM guides WHERE research_run = r.id) AS guides_written,
+               (SELECT count(*) FROM guides WHERE review_run = r.id) AS guides_reviewed,
+               (SELECT count(*) FROM guides WHERE review_run = r.id AND state = 'retired') AS guides_rejected,
+               (SELECT count(*) FROM facts WHERE review_run = r.id AND state = 'retired') AS facts_rejected,
+               (SELECT count(DISTINCT f.id) FROM facts f JOIN fact_events e ON e.fact_id = f.id AND e.run_id = r.id
+                WHERE f.review_run = r.id AND cardinality(e.changes) > 0
+                  AND NOT e.changes <@ ARRAY['flagged', 'unflagged']) AS facts_edited,
+               (SELECT count(DISTINCT lower(review_notes)) FROM facts WHERE review_run = r.id) AS distinct_notes,
+               (SELECT count(*) FROM source_reads WHERE run_id = r.id) AS sources_read,
+               to_char(greatest(r.started_at,
+                   (SELECT max(read_at) FROM source_reads WHERE run_id = r.id),
+                   (SELECT max(created_at) FROM facts WHERE research_run = r.id),
+                   (SELECT max(reviewed_at) FROM facts WHERE review_run = r.id),
+                   (SELECT max(created_at) FROM guides WHERE research_run = r.id),
+                   (SELECT max(reviewed_at) FROM guides WHERE review_run = r.id),
+                   (SELECT max(created_at) FROM images WHERE added_run = r.id)), 'YYYY-MM-DD HH24:MI') AS last_activity,
+               extract(epoch FROM now() - greatest(r.started_at,
+                   (SELECT max(read_at) FROM source_reads WHERE run_id = r.id),
+                   (SELECT max(reviewed_at) FROM facts WHERE review_run = r.id),
+                   (SELECT max(created_at) FROM guides WHERE research_run = r.id),
+                   (SELECT max(reviewed_at) FROM guides WHERE review_run = r.id))) / 60 AS idle_minutes
         FROM pipeline_runs r WHERE r.kind <> 'import' ORDER BY r.started_at DESC LIMIT 300""")
     cities = _rows(conn, """
         SELECT ci.name AS city,
@@ -144,7 +165,27 @@ def build(conn) -> dict:
         p = by_place.get(f["place_id"])
         if p and f["state"] == "published" and f["verified"]:
             city_totals[p["city"] or "Other"]["verified"] += 1
-    empty = {"live_places": 0, "published": 0, "drafts": 0, "with_photos": 0, "verified": 0}
+    guides_by_place: dict[str, list[dict]] = {}
+    for g in guides:
+        guides_by_place.setdefault(g["place_id"], []).append(g)
+    empty = {"live_places": 0, "published": 0, "drafts": 0, "with_photos": 0, "verified": 0, "unverified": 0, "waiting": 0,
+             "guides_live": 0, "guides_waiting": 0, "guides_missing": 0, "story_places": 0}
+    # Readiness per city: live stories verified or not, stories waiting, and guide coverage of places with stories.
+    for p in places:
+        c = city_totals.setdefault(p["city"] or "Other", dict(empty))
+        for key in ("unverified", "waiting", "guides_live", "guides_waiting", "guides_missing", "story_places"):
+            c.setdefault(key, 0)
+        if p["published"] or p["drafts"] or p["reviewed"]:
+            c["story_places"] += 1
+            states = {g["state"] for g in guides_by_place.get(p["id"], [])}
+            c["guides_live"] += "published" in states
+            c["guides_waiting"] += "published" not in states and bool(states & {"draft", "reviewed"})
+            c["guides_missing"] += not states - {"retired"}
+        c["waiting"] += p["drafts"] + p["reviewed"]
+    for f in facts:
+        p = by_place.get(f["place_id"])
+        if p and f["state"] == "published" and not f["verified"]:
+            city_totals[p["city"] or "Other"]["unverified"] += 1
     for c in cities:
         c.update({**empty, **city_totals.get(c["city"], {})})
     # Places outside every research city (a town on the edge of one) still get a row.

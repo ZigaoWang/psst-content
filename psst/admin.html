@@ -87,6 +87,17 @@
   iframe { width: 100%; height: calc(100vh - 110px); border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
   @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .ready { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  .ready .card h3 { margin: 0 0 10px; font-size: 15px; }
+  .ready .row { display: grid; grid-template-columns: 62px 1fr 92px; gap: 10px; align-items: center; margin: 7px 0; font-size: 12px; }
+  .ready .row .bar { height: 12px; min-width: 0; }
+  .ready .row .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px;
+          box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent); animation: pulse 1.6s infinite; }
+  .live.stalled { background: var(--amber); animation: none; }
+  @keyframes pulse { 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
   .empty { padding: 30px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; }
 </style>
 </head>
@@ -149,6 +160,63 @@ window.addEventListener("hashchange", route);
 
 // Overview ------------------------------------------------------------------------------------------------
 
+// Colors for every progress bar, so "good", "in progress", and "missing" read the same everywhere.
+const C = {good: "var(--green)", pending: "var(--purple)", weak: "var(--amber)", missing: "var(--red)", none: "var(--chip)"};
+const legend = items => `<div class="legend">${items.map(([color, label]) => `<span><i style="background:${color}"></i>${label}</span>`).join("")}</div>`;
+function stack(parts, title) {
+  const total = parts.reduce((a, [n]) => a + n, 0) || 1;
+  return `<div class="bar" title="${esc(title)}">${parts.map(([n, color]) => n ? `<span style="width:${100 * n / total}%;background:${color}"></span>` : "").join("")}</div>`;
+}
+
+// What's happening right now: open runs, with how long since each last did anything.
+function activityPanel() {
+  const open = D.runs.filter(r => !r.finished);
+  if (!open.length) return `<div class="empty">Nothing is running.</div>`;
+  return `<table><tr><th>Session</th><th>Model</th><th>Started (UTC)</th><th>Last activity</th><th>Done so far</th></tr>
+    ${open.map(r => {
+      const live = r.idle_minutes < 30;
+      return `<tr><td><span class="live ${live ? "" : "stalled"}" title="${live ? "active in the last 30 minutes" : "no activity for a while: stalled or stopped"}"></span>
+          <b>${esc(r.notes || r.kind)}</b><div class="small muted">${esc(r.kind)} · ${r.id}</div></td>
+        <td class="small">${esc(r.model || r.operator)}</td><td class="small">${esc(r.started)}</td>
+        <td class="small">${esc(r.last_activity)}${live ? "" : ` ${badge("draft", "stalled " + ago(r.idle_minutes))}`}</td>
+        <td class="small">${runSummary(r) || "starting"}${reviewHealth(r)}</td></tr>`;
+    }).join("")}</table>`;
+}
+const plural = (n, one, many = one + "s") => `${fmt(n)} ${n === 1 ? one : many}`;
+const ago = m => m < 90 ? `${Math.round(m)} min` : m < 2880 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`;
+
+// Per city: are its stories checked, does every place have guide information, how many have photos.
+function readinessPanel() {
+  const rows = D.cities.filter(c => c.story_places || c.live_places);
+  return legend([[C.good, "verified, or live"], [C.pending, "waiting for review"], [C.weak, "live but never verified"],
+                 [C.missing, "missing"]]) + `<div class="ready">${rows.map(c => {
+    return `<div class="card"><h3>${esc(c.city)} <span class="muted small">${fmt(c.live_places)} live places</span></h3>
+      <div class="row"><span>Stories</span>${stack([[c.verified, C.good], [c.waiting, C.pending], [c.unverified, C.weak]],
+        `${c.verified} verified, ${c.waiting} waiting for review, ${c.unverified} live but never verified`)}
+        <span class="v">${pct(c.verified, c.verified + c.unverified)} verified</span></div>
+      <div class="row"><span>Guides</span>${stack([[c.guides_live, C.good], [c.guides_waiting, C.pending], [c.guides_missing, C.missing]],
+        `${c.guides_live} live, ${c.guides_waiting} waiting for review, ${c.guides_missing} not written`)}
+        <span class="v">${pct(c.guides_live, c.story_places)} live</span></div>
+      <div class="row"><span>Photos</span>${stack([[c.with_photos, C.good], [c.live_places - c.with_photos, C.none]],
+        `${c.with_photos} of ${c.live_places} live places have a photo`)}
+        <span class="v">${pct(c.with_photos, c.live_places)}</span></div>
+      <div class="small muted">${[c.unverified && `${plural(c.unverified, "story", "stories")} to verify`,
+        c.waiting && `${plural(c.waiting, "story", "stories")} to review`,
+        c.guides_missing && `${plural(c.guides_missing, "guide")} to write`, c.guides_waiting && `${plural(c.guides_waiting, "guide")} to review`]
+        .filter(Boolean).join(" · ") || "Nothing waiting."}</div></div>`;
+  }).join("")}</div>`;
+}
+
+// A review that approves everything, repeats its notes, or opens fewer sources than it decides wasn't careful.
+function reviewHealth(r) {
+  if (r.kind !== "review" || !r.facts_reviewed) return "";
+  const warn = [];
+  if (r.facts_reviewed >= 40 && !r.facts_rejected && !r.facts_edited) warn.push("approved everything");
+  if (r.distinct_notes < r.facts_reviewed * 0.9) warn.push("repeated notes");
+  if (r.sources_read < r.facts_reviewed * 0.8) warn.push("few sources opened");
+  return warn.length ? `<div>${warn.map(w => badge("flagged", w)).join(" ")}</div>` : "";
+}
+
 function renderOverview() {
   const t = D.totals;
   const waiting = t.facts.draft + t.facts.reviewed + t.flagged + t.photos.draft + t.photos.reviewed;
@@ -156,6 +224,11 @@ function renderOverview() {
       <div class="n">${n}</div><div class="l">${l}</div></div>`;
   const b = D.backup || {};
   return `
+  <h2>Activity</h2>
+  ${activityPanel()}
+  <h2>Readiness by city</h2>
+  ${readinessPanel()}
+  <h2>Totals</h2>
   <div class="cards">
     ${card(fmt(t.live_places), "places live in the app", "places")}
     ${card(fmt(t.facts.published), "published stories", "places")}
@@ -224,7 +297,9 @@ function runSummary(r) {
   if (r.facts_reviewed) parts.push(`${r.facts_reviewed} stories reviewed`);
   if (r.photos_added) parts.push(`${r.photos_added} photos added`);
   if (r.photos_reviewed) parts.push(`${r.photos_reviewed} photos reviewed`);
-  return esc(parts.join(", ") || r.notes || "");
+  if (r.guides_written) parts.push(`${r.guides_written} guides written`);
+  if (r.guides_reviewed) parts.push(`${r.guides_reviewed} guides reviewed${r.guides_rejected ? ` (${r.guides_rejected} rejected)` : ""}`);
+  return esc(parts.join(", "));
 }
 
 // Places --------------------------------------------------------------------------------------------------
@@ -478,11 +553,20 @@ function renderReports() {
 }
 
 function renderRuns() {
-  return `<table><tr><th>Started (UTC)</th><th>Finished</th><th>Kind</th><th>Model</th><th>Did</th><th>Notes</th></tr>
-    ${D.runs.map(r => `<tr><td class="small">${esc(r.started)}</td>
-      <td class="small">${r.finished ? esc(r.finished) : badge("open", "running")}</td><td>${esc(r.kind)}</td>
-      <td class="small">${esc(r.model || r.operator)}</td><td class="small">${runSummary(r)}</td>
-      <td class="small muted">${esc(r.notes || "")}${r.cell ? ` · ${esc(r.cell)}` : ""}</td></tr>`).join("")}</table>`;
+  const status = r => r.finished ? badge("done", "finished") : r.idle_minutes < 30 ? `<span class="live"></span>running` : badge("draft", "stalled");
+  return `<p class="muted">Every batch of work. For reviews, the bar shows how each story was decided; a careful review edits and
+    rejects a real share. Badges mark reviews that look careless.</p>
+    ${legend([[C.good, "approved as written"], [C.pending, "edited, then approved"], [C.missing, "rejected"]])}
+    <table><tr><th>Started (UTC)</th><th>Status</th><th>Kind</th><th>Model</th><th>Did</th><th>Review decisions</th><th>Notes</th></tr>
+    ${D.runs.map(r => {
+      const approved = r.facts_reviewed - r.facts_edited - r.facts_rejected;
+      return `<tr><td class="small">${esc(r.started)}</td><td class="small">${status(r)}</td><td>${esc(r.kind)}</td>
+      <td class="small" style="white-space:nowrap">${esc(r.model || r.operator)}</td><td class="small">${runSummary(r)}${reviewHealth(r)}</td>
+      <td style="min-width:170px">${r.facts_reviewed ? `${stack([[approved, C.good], [r.facts_edited, C.pending], [r.facts_rejected, C.missing]],
+          `${approved} approved, ${r.facts_edited} edited, ${r.facts_rejected} rejected`)}
+          <div class="small muted">${approved} approved · ${r.facts_edited} edited · ${r.facts_rejected} rejected</div>` : ""}</td>
+      <td class="small muted">${esc(r.notes || "")}${r.cell ? ` · ${esc(r.cell)}` : ""}</td></tr>`;
+    }).join("")}</table>`;
 }
 
 function renderDemand() {
