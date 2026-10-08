@@ -182,8 +182,12 @@ def test_rejected_drafts_never_publish(scratch, cell, tag_id, tmp_path):
 def test_reports_flag_published_facts_for_review(scratch):
     fact = scratch.execute("SELECT id FROM facts WHERE state = 'published' LIMIT 1").fetchone()
     scratch.execute("SELECT psst.submit_report(%s, 'wrong', 'The date is off.', 'test')", (fact["id"],))
-    queue = review.queue(scratch, 5)
-    assert queue[0]["id"] == fact["id"] and queue[0]["reports"][0]["reason"] == "wrong"
+    queue = review.queue(scratch, 5000)
+    # Reported facts come before drafts; other facts may be flagged too, so find this one among them.
+    flagged = [q for q in queue if q["needs_review"]]
+    mine = next(q for q in flagged if q["id"] == fact["id"])
+    assert mine["reports"][0]["reason"] == "wrong"
+    assert queue.index(mine) < next((i for i, q in enumerate(queue) if q["state"] == "draft"), len(queue))
     reviewer = start(scratch, "review", "test-reviewer")
     read_sources(scratch, reviewer["id"], fact["id"])
     review.apply(scratch, [{"fact": fact["id"], "decision": "approve",
