@@ -30,7 +30,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import connect as connect_sync
 
 DATABASE = ("127.0.0.1", 5432)
-MAX_CONNECTIONS = 12
+MAX_CONNECTIONS = 50
 CHUNK = 65536
 
 log = logging.getLogger("psst.tunnel")
