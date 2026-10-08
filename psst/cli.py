@@ -81,7 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args) or 0
     except KeyboardInterrupt:
         return 130
-    except RuntimeError as error:
+    except json.JSONDecodeError as error:
+        print(f"error: not valid JSON: {error}", file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
