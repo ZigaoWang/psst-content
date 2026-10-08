@@ -99,19 +99,17 @@ def build(conn) -> dict:
                   AND NOT e.changes <@ ARRAY['flagged', 'unflagged']) AS facts_edited,
                (SELECT count(DISTINCT lower(review_notes)) FROM facts WHERE review_run = r.id) AS distinct_notes,
                (SELECT count(*) FROM source_reads WHERE run_id = r.id) AS sources_read,
-               to_char(greatest(r.started_at,
-                   (SELECT max(read_at) FROM source_reads WHERE run_id = r.id),
-                   (SELECT max(created_at) FROM facts WHERE research_run = r.id),
-                   (SELECT max(reviewed_at) FROM facts WHERE review_run = r.id),
-                   (SELECT max(created_at) FROM guides WHERE research_run = r.id),
-                   (SELECT max(reviewed_at) FROM guides WHERE review_run = r.id),
-                   (SELECT max(created_at) FROM images WHERE added_run = r.id)), 'YYYY-MM-DD HH24:MI') AS last_activity,
-               extract(epoch FROM now() - greatest(r.started_at,
-                   (SELECT max(read_at) FROM source_reads WHERE run_id = r.id),
-                   (SELECT max(reviewed_at) FROM facts WHERE review_run = r.id),
-                   (SELECT max(created_at) FROM guides WHERE research_run = r.id),
-                   (SELECT max(reviewed_at) FROM guides WHERE review_run = r.id))) / 60 AS idle_minutes
-        FROM pipeline_runs r WHERE r.kind <> 'import' ORDER BY r.started_at DESC LIMIT 300""")
+               to_char(activity.last, 'YYYY-MM-DD HH24:MI') AS last_activity,
+               extract(epoch FROM now() - activity.last) / 60 AS idle_minutes
+        FROM pipeline_runs r
+        CROSS JOIN LATERAL (SELECT greatest(r.started_at,
+            (SELECT max(read_at) FROM source_reads WHERE run_id = r.id),
+            (SELECT max(created_at) FROM facts WHERE research_run = r.id),
+            (SELECT max(reviewed_at) FROM facts WHERE review_run = r.id),
+            (SELECT max(created_at) FROM guides WHERE research_run = r.id),
+            (SELECT max(reviewed_at) FROM guides WHERE review_run = r.id),
+            (SELECT max(created_at) FROM images WHERE added_run = r.id)) AS last) activity
+        WHERE r.kind <> 'import' ORDER BY r.started_at DESC LIMIT 300""")
     cities = _rows(conn, """
         SELECT ci.name AS city,
                count(*) AS cells,
