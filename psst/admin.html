@@ -96,10 +96,8 @@
   .ready .row { display: grid; grid-template-columns: 62px 1fr 92px; gap: 10px; align-items: center; margin: 7px 0; font-size: 12px; }
   .ready .row .bar { height: 12px; min-width: 0; }
   .ready .row .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
-  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px;
-          box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent); animation: pulse 1.6s infinite; }
-  .live.stalled { background: var(--amber); animation: none; }
-  @keyframes pulse { 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; }
+  .live.stalled { background: var(--amber); }
   .empty { padding: 30px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; }
 </style>
 </head>
@@ -128,16 +126,22 @@ const img = file => `/images/${file}`;
 // Asks the server to rebuild the data now instead of at the next 10-minute rebuild, then waits for it.
 async function refresh() {
   const button = document.getElementById("refresh");
-  const before = D?.generatedAt;
+  const before = D?.builtAt || 0;
   button.disabled = true;
   button.textContent = "Refreshing…";
   try {
     const res = await fetch(new URL("refresh", location.origin + location.pathname), {method: "POST"});
     if (!res.ok) throw new Error(`the server answered ${res.status}`);
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 6000));
+    // The server picks up the request within a minute and the rebuild takes about 15 seconds.
+    for (let i = 0; i < 36; i++) {
+      await new Promise(r => setTimeout(r, 5000));
       const data = await fetchData();
-      if (data.generatedAt !== before) { show(data); route(); button.textContent = "Refresh"; button.disabled = false; return; }
+      if ((data.builtAt || 0) > before) {
+        show(data); route();
+        button.textContent = "Refreshed";
+        setTimeout(() => { button.textContent = "Refresh"; button.disabled = false; }, 2000);
+        return;
+      }
     }
     throw new Error("it took longer than 3 minutes");
   } catch (e) {

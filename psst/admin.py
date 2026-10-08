@@ -214,7 +214,9 @@ def build(conn) -> dict:
                                   & {p["id"] for p in live_places}),
     }
     generated = conn.execute("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI \"UTC\"') AS at").fetchone()["at"]
-    return {"generatedAt": generated, "totals": totals, "cities": cities, "places": places, "facts": facts,
+    # Exact to the second, so the Refresh button can tell a rebuild it asked for from the one before.
+    built = conn.execute("SELECT extract(epoch FROM now())::bigint AS at").fetchone()["at"]
+    return {"generatedAt": generated, "builtAt": built, "totals": totals, "cities": cities, "places": places, "facts": facts,
             "images": images, "guides": guides, "reports": reports, "runs": runs, "demand": demand, "publications": publications,
             "tags": tags, "backup": status}
 
