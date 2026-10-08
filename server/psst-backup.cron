@@ -5,7 +5,7 @@
 # Every Saturday, check every cited link and flag facts whose sources failed twice in a row.
 37 5 * * 6 root cd /www/wwwroot/psst/app && PSST_CONFIG=/www/wwwroot/psst/.env LC_ALL=C.UTF-8 /root/.local/bin/uv run --no-dev psst sources check >> /var/log/psst-links.log 2>&1
 # Every 10 minutes, rebuild the admin page at /admin/ from the database (psst/admin.py).
-# Every minute, rebuild it at once if someone pressed Refresh on the page (server/api.py leaves the request).
-# flock keeps two rebuilds from overlapping.
 */10 * * * * root cd /www/wwwroot/psst/app && PSST_CONFIG=/www/wwwroot/psst/.env LC_ALL=C.UTF-8 flock -n /run/psst-admin.lock /root/.local/bin/uv run --no-dev psst admin --out /www/wwwroot/psst/public/admin >> /var/log/psst-admin.log 2>&1
-* * * * * root test -e /www/wwwroot/psst/run/admin-refresh && rm -f /www/wwwroot/psst/run/admin-refresh && cd /www/wwwroot/psst/app && PSST_CONFIG=/www/wwwroot/psst/.env LC_ALL=C.UTF-8 flock -w 300 /run/psst-admin.lock /root/.local/bin/uv run --no-dev psst admin --out /www/wwwroot/psst/public/admin >> /var/log/psst-admin.log 2>&1
+# Every minute, carry out anything asked for with the admin page's buttons: Refresh, Publish, Roll back
+# (server/admin-actions.sh; server/api.py leaves the requests).
+* * * * * root sh /www/wwwroot/psst/app/server/admin-actions.sh

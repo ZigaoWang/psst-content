@@ -1146,27 +1146,14 @@ def publish_command(args) -> int:
     with db.connect(actor="publish") as conn:
         run = runs.start(conn, "publish", None, notes=args.allow_shrink and f"Allowed to shrink: {args.allow_shrink}")
     with db.connect(actor="publish", run=run) as conn:
-        reviewed = [] if args.no_new_facts else [r["id"] for r in conn.execute(
-            "SELECT id FROM facts WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
-        reviewed_images = [] if args.no_new_facts else [r["id"] for r in conn.execute(
-            "SELECT id FROM images WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
-        reviewed_guides = [] if args.no_new_facts else [r["id"] for r in conn.execute(
-            "SELECT id FROM guides WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
-        from . import guides
-        reviewed_guides, held = guides.publishable(conn, reviewed_guides)
-        if held:
-            print("Guides wait until every live place in the city has an approved one: " + ", ".join(held)
-                  + " (psst guide progress).")
-        # A place goes live only with its guide: stories for a place that isn't live yet wait until its
-        # guide is reviewed too.
-        waiting = {r["id"] for r in conn.execute("""
-            SELECT f.id FROM facts f WHERE f.id = ANY(%s)
-              AND NOT EXISTS (SELECT 1 FROM facts o WHERE o.place_id = f.place_id AND o.state = 'published')
-              AND NOT EXISTS (SELECT 1 FROM guides g WHERE g.place_id = f.place_id
-                              AND (g.state = 'published' OR g.id = ANY(%s)))""", (reviewed, reviewed_guides))}
-        if waiting:
-            print(f"{len(waiting)} reviewed stories wait for their place's guide to be reviewed (psst guide next).")
-            reviewed = [f for f in reviewed if f not in waiting]
+        chosen = publish.select(conn, args.no_new_facts)
+        if chosen["held_cities"]:
+            print("Guides wait until every live place in the city has an approved one: "
+                  + ", ".join(chosen["held_cities"]) + " (psst guide progress).")
+        if chosen["facts_waiting_for_guides"]:
+            print(f"{chosen['facts_waiting_for_guides']} reviewed stories wait for their place's guide to be reviewed "
+                  "(psst guide next).")
+        reviewed, reviewed_images, reviewed_guides = chosen["facts"], chosen["images"], chosen["guides"]
         result = export.build(conn, ROOT / "export", include=reviewed, include_images=reviewed_images,
                               include_guides=reviewed_guides)
     print(f"Exported {result.places} places, {result.facts} facts ({len(reviewed)} newly published), "
@@ -1180,12 +1167,16 @@ def publish_command(args) -> int:
                      (result.manifest["contentVersion"], json.dumps(result.manifest), result.places, result.facts,
                       run, "; ".join(problems) or "Checks passed."))
     if problems:
+        with db.connect(actor="publish", run=run) as conn:
+            runs.finish(conn, run)
         print("Staging check FAILED. Production is unchanged.")
         for problem in problems[:40]:
             print(f"  {problem}")
         return 1
     print("Staging check passed.")
     if args.only_staging:
+        with db.connect(actor="publish", run=run) as conn:
+            runs.finish(conn, run)
         return 0
     manifest = publish.promote(config["host"])
     with db.connect(actor="publish", run=run, note="Published through staging.") as conn:
@@ -1197,6 +1188,7 @@ def publish_command(args) -> int:
         # Likewise a reviewed guide for a place with no published story yet.
         conn.execute("UPDATE guides SET state = 'published', published_at = now() "
                      "WHERE id = ANY(%s) AND state = 'reviewed'", (result.guides,))
+        from . import guides
         guides.retire_replaced(conn, result.guides)
         conn.execute("INSERT INTO publications (channel, content_version, manifest, places, facts, run_id) "
                      "VALUES ('production', %s, %s, %s, %s, %s)",
@@ -1210,7 +1202,10 @@ def publish_command(args) -> int:
     try:
         from . import admin
         with db.connect() as conn:
-            admin.upload(config["host"], admin.write(conn, ROOT / "export" / "admin"))
+            if config["host"] == publish.LOCAL:
+                admin.write(conn, Path(admin.REMOTE_DIR))
+            else:
+                admin.upload(config["host"], admin.write(conn, ROOT / "export" / "admin"))
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"(The admin page wasn't refreshed: {exc}. It refreshes on its own within 10 minutes.)")
     return 0

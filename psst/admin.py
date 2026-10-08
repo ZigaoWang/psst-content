@@ -132,6 +132,9 @@ def build(conn) -> dict:
     publications = _rows(conn, """
         SELECT content_version AS version, places, facts, notes, to_char(created_at, 'YYYY-MM-DD HH24:MI') AS at
         FROM publications WHERE channel = 'production' ORDER BY created_at DESC LIMIT 30""")
+    staging_failures = _rows(conn, """
+        SELECT content_version AS version, notes, to_char(created_at, 'YYYY-MM-DD HH24:MI') AS at
+        FROM publications WHERE channel = 'staging' AND notes <> 'Checks passed.' ORDER BY created_at DESC LIMIT 5""")
     tags = _rows(conn, """
         SELECT t.canonical_name AS name, t.type, count(DISTINCT f.place_id) AS places
         FROM tags t JOIN fact_tags ft ON ft.tag_id = t.id JOIN facts f ON f.id = ft.fact_id AND f.state = 'published'
@@ -213,11 +216,22 @@ def build(conn) -> dict:
         "places_with_guides": len({g["place_id"] for g in guides if g["state"] == "published"}
                                   & {p["id"] for p in live_places}),
     }
+    from . import publish
+    chosen = publish.select(conn)
+    next_publish = {"stories": len(chosen["facts"]), "photos": len(chosen["images"]), "guides": len(chosen["guides"]),
+                    "held_cities": chosen["held_cities"], "stories_waiting_for_guides": chosen["facts_waiting_for_guides"],
+                    "retiring": conn.execute("""SELECT count(*) AS n FROM facts WHERE state = 'retired' AND published_at IS NOT NULL
+                        AND retired_at > coalesce((SELECT max(created_at) FROM publications WHERE channel = 'production'),
+                                                  'epoch')""").fetchone()["n"],
+                    "corrected": conn.execute("""SELECT count(DISTINCT e.fact_id) AS n FROM fact_events e JOIN facts f ON f.id = e.fact_id
+                        WHERE f.state = 'published' AND e.changes && ARRAY['category', 'veracity', 'headline', 'short', 'long']
+                          AND e.at > coalesce((SELECT max(created_at) FROM publications WHERE channel = 'production'),
+                                              'epoch')""").fetchone()["n"]}
     generated = conn.execute("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI \"UTC\"') AS at").fetchone()["at"]
     # Exact to the second, so the Refresh button can tell a rebuild it asked for from the one before.
     built = conn.execute("SELECT extract(epoch FROM now())::bigint AS at").fetchone()["at"]
-    return {"generatedAt": generated, "builtAt": built, "totals": totals, "cities": cities, "places": places, "facts": facts,
-            "images": images, "guides": guides, "reports": reports, "runs": runs, "demand": demand, "publications": publications,
+    return {"generatedAt": generated, "builtAt": built, "nextPublish": next_publish, "totals": totals, "cities": cities, "places": places, "facts": facts,
+            "images": images, "guides": guides, "reports": reports, "runs": runs, "demand": demand, "publications": publications, "stagingFailures": staging_failures,
             "tags": tags, "backup": status}
 
 
@@ -236,7 +250,10 @@ def write(conn, directory: Path) -> Path:
 
 
 def upload(host: str, directory: Path) -> None:
+    from .publish import LOCAL, target
+    if host == LOCAL:
+        return  # on the server the page is written in place (psst admin --out)
     subprocess.run(["rsync", "-rt", "--no-owner", "--no-group", "--delay-updates", f"{directory}/",
-                    f"{host}:{REMOTE_DIR}/"], check=True)
+                    target(host, f"{REMOTE_DIR}/")], check=True)
     # macOS's rsync has no --chmod, so set what the web server needs afterwards.
     subprocess.run(["ssh", host, f"chmod 755 {REMOTE_DIR} && chmod 644 {REMOTE_DIR}/*"], check=True)

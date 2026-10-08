@@ -98,6 +98,11 @@
   .ready .row .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
   .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; }
   .live.stalled { background: var(--amber); }
+  pre.log { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: 12px;
+            white-space: pre-wrap; max-height: 420px; overflow: auto; margin: 0; }
+  button.primary { background: var(--text); color: var(--panel); border-color: var(--text); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0 6px; }
   .empty { padding: 30px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; }
 </style>
 </head>
@@ -112,7 +117,7 @@
 <aside id="drawer"></aside>
 <div id="lightbox"><img alt=""><p></p></div>
 <script>
-const TABS = [["overview", "Overview"], ["places", "Places"], ["review", "Review queue"], ["photos", "Photos"],
+const TABS = [["overview", "Overview"], ["publish", "Publish"], ["places", "Places"], ["review", "Review queue"], ["photos", "Photos"],
               ["reports", "Reports"], ["runs", "Runs"], ["demand", "Demand"], ["map", "Map"]];
 const STATE_COLORS = {done: "var(--green)", partial: "#7fb77e", in_progress: "var(--accent)", untouched: "var(--chip)"};
 let D, byPlace = {}, factsByPlace = {}, imagesByPlace = {}, guidesByPlace = {};
@@ -188,9 +193,10 @@ function route() {
   }
   closeDrawer(false);
   main.dataset.tab = tab;
-  main.innerHTML = ({overview: renderOverview, places: renderPlaces, review: renderReview, photos: renderPhotos,
+  main.innerHTML = ({overview: renderOverview, publish: renderPublish, places: renderPlaces, review: renderReview, photos: renderPhotos,
                      reports: renderReports, runs: renderRuns, demand: renderDemand, map: renderMap}[tab] || renderOverview)();
   if (tab === "places") bindPlaces();
+  if (tab === "publish") loadAction();
   if (tab === "photos") bindPhotos();
   window.scrollTo(0, 0);
 }
@@ -510,6 +516,88 @@ function showPhoto(file, caption) {
   box.classList.add("on");
 }
 document.getElementById("lightbox").addEventListener("click", e => e.currentTarget.classList.remove("on"));
+
+// Publish ---------------------------------------------------------------------------------------------------
+
+function renderPublish() {
+  const n = D.nextPublish, live = D.publications[0];
+  const nothing = !n.stories && !n.guides && !n.photos && !n.retiring && !n.corrected;
+  return `<div class="cards">
+      <div class="card"><div class="n">${fmt(n.stories)}</div><div class="l">Approved stories that go live</div></div>
+      <div class="card"><div class="n">${fmt(n.guides)}</div><div class="l">Approved guides that go live</div></div>
+      <div class="card"><div class="n">${fmt(n.photos)}</div><div class="l">Approved photos that go live</div></div>
+      <div class="card"><div class="n">${fmt(n.corrected)}</div><div class="l">Live stories corrected</div></div>
+      <div class="card"><div class="n">${fmt(n.retiring)}</div><div class="l">Rejected stories taken down</div></div>
+    </div>
+    ${n.stories_waiting_for_guides ? `<p class="small muted">${plural(n.stories_waiting_for_guides, "approved story", "approved stories")} stay back until their place's guide is approved.</p>` : ""}
+    ${n.held_cities.length ? `<p class="small muted">Guides stay back until every live place in the city has one: ${esc(n.held_cities.join(", "))}.</p>` : ""}
+    <div class="actions">
+      <button class="primary" id="publish-button" onclick="adminAction('publish')" ${nothing ? "disabled" : ""}>Publish</button>
+      <button id="check-button" onclick="adminAction('check')">Check without publishing</button>
+      <button id="rollback-button" onclick="adminAction('rollback')" ${D.publications.length < 2 ? "disabled" : ""}>Roll back to the previous version</button>
+      <span class="small muted" id="action-note">${nothing ? "Nothing new to publish." : "Publishing checks everything on staging first; production changes only if every check passes."}</span>
+    </div>
+    <h2>Last publish or rollback</h2>
+    <div id="action-status"><div class="empty">Loading…</div></div>
+    <h2>Live versions</h2>
+    <table><tr><th>Version</th><th>Published (UTC)</th><th class="num">Places</th><th class="num">Stories</th></tr>
+      ${D.publications.slice(0, 10).map((p, i) => `<tr><td>${esc(p.version)} ${i === 0 ? badge("published", "live") : ""}</td><td>${esc(p.at)}</td>
+        <td class="num">${fmt(p.places)}</td><td class="num">${fmt(p.facts)}</td></tr>`).join("")}</table>
+    ${D.stagingFailures.length ? `<h2>Failed staging checks</h2><table><tr><th>When (UTC)</th><th>Version</th><th>Problems</th></tr>
+      ${D.stagingFailures.map(f => `<tr><td class="small">${esc(f.at)}</td><td class="small">${esc(f.version)}</td>
+        <td class="small">${esc(f.notes)}</td></tr>`).join("")}</table>` : ""}`;
+}
+
+const ACTION_NAMES = {publish: "Publish", rollback: "Roll back", check: "Check"};
+
+async function adminAction(action) {
+  const n = D.nextPublish;
+  const question = {
+    publish: `Publish now? ${n.stories} stories, ${n.guides} guides, and ${n.photos} photos go live, ${n.corrected} live stories are corrected, and ${n.retiring} are taken down.`,
+    rollback: `Roll back? The app goes back to the version before ${D.publications[0]?.version}.`,
+  }[action];
+  if (question && !confirm(question)) return;
+  document.querySelectorAll("#publish-button, #check-button, #rollback-button").forEach(b => b.disabled = true);
+  const note = document.getElementById("action-note");
+  const res = await fetch(new URL(action, location.origin + location.pathname), {method: "POST"});
+  note.textContent = res.ok ? "Asked. The server starts within a minute." : res.status === 409 ? "Already asked; it starts within a minute." : `The server answered ${res.status}.`;
+  pollAction(Date.now());
+}
+
+async function fetchAction() {
+  const res = await fetch(new URL("action.json", location.origin + location.pathname), {cache: "no-cache"});
+  return res.ok ? res.json() : null;
+}
+
+async function loadAction() {
+  const a = await fetchAction();
+  showAction(a);
+  if (a?.state === "running") pollAction(Date.now());
+}
+
+function showAction(a) {
+  const box = document.getElementById("action-status");
+  if (!box) return;
+  if (!a) { box.innerHTML = `<div class="empty">Nothing published from this page yet.</div>`; return; }
+  const state = {running: badge("draft", "running"), done: badge("published", "succeeded"), failed: badge("failed", "failed")}[a.state];
+  box.innerHTML = `<p>${esc(ACTION_NAMES[a.action] || a.action)} ${state} <span class="small muted">started ${esc(a.started || "")}${a.finished ? `, finished ${esc(a.finished)}` : ""}</span></p>
+    ${a.output ? `<pre class="log">${esc(a.output)}</pre>` : ""}`;
+}
+
+// Follows a publish or rollback until it finishes, then reloads the data.
+async function pollAction(since) {
+  for (let i = 0; i < 120; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const a = await fetchAction();
+    showAction(a);
+    const finishedAfter = a?.finished && Date.parse(a.finished.replace(" UTC", "Z").replace(" ", "T")) > since - 60000;
+    if (a && a.state !== "running" && finishedAfter) {
+      show(await fetchData());
+      if (location.hash.startsWith("#publish")) route();
+      return;
+    }
+  }
+}
 
 // Review queue ----------------------------------------------------------------------------------------------
 

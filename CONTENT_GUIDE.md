@@ -693,6 +693,7 @@ A place goes live only with its guide: reviewed stories for a place that isn't l
 
 If any check fails, production is untouched and the problems are listed. Apps keep the last good version they have, and they never switch to a download that doesn't check out.
 
+- **From the admin page:** the Publish tab shows what the next publish puts live (approved stories, guides, and photos, corrected stories, rejected stories taken down, and what's held back), with buttons to publish, check without publishing, and roll back. The server carries out a click within a minute and shows the full output on the page. `psst bundle` still runs on your own machine, since it copies into the app repository.
 - `--only-staging`: stop after checking staging.
 - `--allow-shrink "reason"`: allow a drop of more than 2 percent (for example after retiring a batch). The reason is recorded.
 - `--no-new-facts`: re-export what's already published, for example to publish a tag merge.

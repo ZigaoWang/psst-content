@@ -31,8 +31,17 @@ def settings() -> dict[str, str]:
             "url": values.get("PSST_CONTENT_URL", "https://psst.zigao.wang").rstrip("/")}
 
 
+LOCAL = "local"  # PSST_SSH_HOST=local: running on the server itself, as the admin page's Publish button does
+
+
 def _ssh(host: str, command: str) -> str:
-    return subprocess.run(["ssh", host, command], check=True, capture_output=True, text=True).stdout
+    argv = ["sh", "-c", command] if host == LOCAL else ["ssh", host, command]
+    return subprocess.run(argv, check=True, capture_output=True, text=True).stdout
+
+
+def target(host: str, path: str) -> str:
+    """Where rsync and scp copy to: a path on this machine, or host:path."""
+    return path if host == LOCAL else f"{host}:{path}"
 
 
 def _channel(channel: str) -> str:
@@ -41,8 +50,9 @@ def _channel(channel: str) -> str:
 
 def upload_staging(host: str, directory: Path) -> None:
     remote = _channel("staging")
-    subprocess.run(["rsync", "-a", f"{directory}/packs/", f"{host}:{remote}/packs/"], check=True)
-    subprocess.run(["scp", "-q", str(directory / "manifest.json"), f"{host}:{remote}/manifest.json.tmp"], check=True)
+    subprocess.run(["rsync", "-a", f"{directory}/packs/", target(host, f"{remote}/packs/")], check=True)
+    subprocess.run(["cp" if host == LOCAL else "scp", str(directory / "manifest.json"),
+                    target(host, f"{remote}/manifest.json.tmp")], check=True)
     _ssh(host, f"mv {remote}/manifest.json.tmp {remote}/manifest.json")
 
 
@@ -137,6 +147,23 @@ def check_staging(base_url: str, allow_shrink: str | None = None) -> list[str]:
             if after < before * (1 - MAX_SHRINK) and not allow_shrink:
                 problems.append(f"{key} would drop from {before} to {after}; pass --allow-shrink with a reason")
     return problems
+
+
+def select(conn, no_new: bool = False) -> dict:
+    """What the next publish puts live: reviewed facts, photos, and guides, minus what has to wait. Guides wait
+    until every live place in their city has one; stories for a place that isn't live yet wait for its guide."""
+    from . import guides
+    ids = lambda table: [] if no_new else [r["id"] for r in conn.execute(
+        f"SELECT id FROM {table} WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
+    facts, images, guide_ids = ids("facts"), ids("images"), ids("guides")
+    guide_ids, held = guides.publishable(conn, guide_ids)
+    waiting = {r["id"] for r in conn.execute("""
+        SELECT f.id FROM facts f WHERE f.id = ANY(%s::text[])
+          AND NOT EXISTS (SELECT 1 FROM facts o WHERE o.place_id = f.place_id AND o.state = 'published')
+          AND NOT EXISTS (SELECT 1 FROM guides g WHERE g.place_id = f.place_id
+                          AND (g.state = 'published' OR g.id = ANY(%s::text[])))""", (facts, guide_ids))}
+    return {"facts": [f for f in facts if f not in waiting], "images": images, "guides": guide_ids,
+            "held_cities": held, "facts_waiting_for_guides": len(waiting)}
 
 
 def promote(host: str) -> dict:
