@@ -171,9 +171,14 @@ def check_prose(report: Report, where: str, field: str, text: str) -> None:
             report.error(loc, f"British spelling '{word}'; use the -ize or -yze form")
 
 
+# Abbreviations whose period doesn't end a sentence: initials ("C. W. Smith") and a few common short forms.
+NOT_SENTENCE_ENDS = re.compile(r"(?:\b[A-Z]|\b(?:No|St|Mr|Mrs|Dr|Jr|Sr|Ltd|Co|vs|c|ca))\.$")
+
+
 def count_sentences(text: str) -> int:
     # Rough count: a terminator followed by whitespace and an uppercase letter or quote, plus the final one.
-    boundaries = re.findall(r"[.?!][\"')”]?\s+(?=[A-Z0-9\"'“(])", text)
+    boundaries = [m for m in re.finditer(r"[.?!][\"')”]?\s+(?=[A-Z0-9\"'“(])", text)
+                  if not NOT_SENTENCE_ENDS.search(text[:m.start() + 1])]
     return len(boundaries) + 1
 
 

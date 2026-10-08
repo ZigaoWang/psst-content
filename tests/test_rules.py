@@ -67,3 +67,9 @@ def test_an_archive_copy_reads_as_its_original():
     assert rules.read_key("https://web.archive.org/web/20200101000000/http://www.example.org/history/page") == rules.read_key(original)
     assert rules.read_key("https://web.archive.org/web/20200101000000id_/https://example.org/history/page") == rules.read_key(original)
     assert rules.read_key("http://example.org/history/page") == rules.read_key(original)
+
+
+def test_initials_and_short_forms_dont_end_sentences():
+    from psst import rules
+    assert rules.count_sentences("Designed by C. W. Stephens in 1901. It stands at No. 5 St. James's Street.") == 2
+    assert rules.count_sentences("Built in 1901. Rebuilt in 1950. Listed in 1970. Closed in 2001.") == 4
