@@ -8,7 +8,9 @@ import gzip
 import html
 import http.client
 import io
+import ipaddress
 import re
+import socket
 import zlib
 import urllib.error
 import urllib.parse
@@ -86,11 +88,41 @@ class _Text(HTMLParser):
         return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def is_public(url: str) -> bool:
+    """Only public web addresses: never this machine or a private network. Pages are read on the server for
+    cloud sessions, so a link or a redirect must not reach anything inside it."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        addresses = {info[4][0] for info in socket.getaddrinfo(parts.hostname, parts.port or 443)}
+    except OSError:
+        return True  # unresolvable: the request fails on its own and says so
+    return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
+
+
+# Set by the server's page reader (psst/tunnel.py). On your own machine there's nothing private to reach, and
+# a VPN can answer lookups with private-looking addresses, so the check would only get in the way there.
+PUBLIC_ONLY = False
+
+
+class _PublicRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if PUBLIC_ONLY and not is_public(newurl):
+            raise urllib.error.HTTPError(newurl, 403, "redirect to a private address", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_PublicRedirects)
+
+
 def _get(url: str) -> tuple[int, str, bytes]:
     """(status, content type, body). Any failure to connect is status 0, never an exception."""
+    if PUBLIC_ONLY and not is_public(url):
+        return 403, "", b""
     request = urllib.request.Request(url, headers={"User-Agent": net.USER_AGENT, "Accept": "text/html,*/*"})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with _opener.open(request, timeout=TIMEOUT) as response:
             body = response.read(5_000_000)
             encoding = (response.headers.get("Content-Encoding") or "").lower()
             return response.status, response.headers.get("Content-Type", ""), _decompress(body, encoding)

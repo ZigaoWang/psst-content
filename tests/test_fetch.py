@@ -49,10 +49,10 @@ def test_pages_decode_in_their_declared_encoding():
 
 
 def test_the_server_fetcher_only_reads_public_addresses():
-    from psst import tunnel
+    from psst import fetch
     for private in ("http://127.0.0.1:5432/", "http://localhost/", "http://10.0.0.1/", "file:///etc/passwd",
                     "http://[::1]/"):
-        assert not tunnel._public(private), private
+        assert not fetch.is_public(private), private
 
 
 def test_find_matches_chinese_words_inside_sentences():

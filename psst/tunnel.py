@@ -73,18 +73,6 @@ FETCH_CACHE_SECONDS = 6 * 3600
 _cache: dict[tuple[str, bool], tuple[float, dict]] = {}
 
 
-def _public(url: str) -> bool:
-    """Only public web addresses: never the server itself or its private network."""
-    parts = urllib.parse.urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return False
-    try:
-        addresses = {info[4][0] for info in socket.getaddrinfo(parts.hostname, parts.port or 443)}
-    except OSError:
-        return True  # unresolvable: the fetch fails on its own and says so
-    return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
-
-
 def _fetch_page(url: str, archive: bool) -> dict:
     from . import fetch
     key = (url, archive)
@@ -101,6 +89,8 @@ def _fetch_page(url: str, archive: bool) -> dict:
 
 
 async def serve_forever(port: int, token_sha256: str) -> None:
+    from . import fetch
+    fetch.PUBLIC_ONLY = True  # pages read here are read from inside the server
     slots = asyncio.Semaphore(MAX_CONNECTIONS)
     fetch_slots = asyncio.Semaphore(FETCH_SLOTS)
 
@@ -111,7 +101,7 @@ async def serve_forever(port: int, token_sha256: str) -> None:
         if request.path.startswith("/fetch"):
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.path).query)
             url = (query.get("url") or [""])[0]
-            if not _public(url):
+            if not fetch.is_public(url):
                 return connection.respond(400, "Only public http and https addresses\n")
             async with fetch_slots:
                 page = await asyncio.to_thread(_fetch_page, url, (query.get("archive") or ["0"])[0] == "1")
