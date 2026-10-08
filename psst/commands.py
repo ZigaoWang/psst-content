@@ -1143,6 +1143,12 @@ def publish_command(args) -> int:
     db.require_server_access("Publishing")
     from . import export, publish, runs
     config = publish.settings()
+    # Held for the whole publish on its own connection: a second publish or rollback, from here or the admin
+    # page, waits its turn instead of promoting something it didn't check.
+    import psycopg
+    from psycopg.rows import dict_row
+    guard = psycopg.connect(db.conninfo(), row_factory=dict_row, autocommit=True)
+    publish.lock(guard)
     with db.connect(actor="publish") as conn:
         run = runs.start(conn, "publish", None, notes=args.allow_shrink and f"Allowed to shrink: {args.allow_shrink}")
     with db.connect(actor="publish", run=run) as conn:
@@ -1178,7 +1184,7 @@ def publish_command(args) -> int:
         with db.connect(actor="publish", run=run) as conn:
             runs.finish(conn, run)
         return 0
-    manifest = publish.promote(config["host"])
+    manifest = publish.promote(config["host"], result.manifest["contentVersion"])
     with db.connect(actor="publish", run=run, note="Published through staging.") as conn:
         conn.execute("UPDATE facts SET state = 'published', published_at = now() "
                      "WHERE id = ANY(%s) AND state = 'reviewed'", (reviewed,))
@@ -1215,7 +1221,11 @@ def publish_command(args) -> int:
          arg("--to", dest="version", help="a content version (default: the one before the current)"))
 def rollback_command(args) -> int:
     db.require_server_access("Rolling back")
+    import psycopg
+    from psycopg.rows import dict_row
     from . import publish
+    guard = psycopg.connect(db.conninfo(), row_factory=dict_row, autocommit=True)
+    publish.lock(guard)
     version = publish.rollback(publish.settings()["host"], args.version)
     print(f"Production now serves {version}.")
     return 0

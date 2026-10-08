@@ -166,10 +166,23 @@ def select(conn, no_new: bool = False) -> dict:
             "held_cities": held, "facts_waiting_for_guides": len(waiting)}
 
 
-def promote(host: str) -> dict:
-    """Copy staging's packs into production and swap production's manifest in one atomic step."""
+PUBLISH_LOCK = 0x70737374  # "psst": one publish or rollback at a time, from any machine
+
+
+def lock(conn) -> None:
+    """Hold the publish lock for this connection's session, or fail at once if someone else holds it."""
+    if not conn.execute("SELECT pg_try_advisory_lock(%s) AS ok", (PUBLISH_LOCK,)).fetchone()["ok"]:
+        raise RuntimeError("Another publish or rollback is running. Wait for it to finish.")
+
+
+def promote(host: str, version: str) -> dict:
+    """Copy staging's packs into production and swap production's manifest in one atomic step. Refuses if
+    staging no longer holds `version`, the one that was just checked."""
     staging, production = _channel("staging"), _channel("production")
     manifest = json.loads(_ssh(host, f"cat {staging}/manifest.json"))
+    if manifest["contentVersion"] != version:
+        raise RuntimeError(f"Staging changed to {manifest['contentVersion']} after {version} was checked; "
+                           "nothing was promoted. Publish again.")
     files = [manifest["common"]["file"]] + [c["file"] for c in manifest["cities"]]
     copies = " && ".join(f"cp -n {staging}/{shlex.quote(f)} {production}/{shlex.quote(f)}" for f in files)
     version = manifest["contentVersion"]
