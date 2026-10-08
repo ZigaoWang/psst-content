@@ -28,6 +28,7 @@ REASONS = {"wrong", "outdated", "location", "offensive", "other"}
 FACT_ID = re.compile(r"^fa_[0-9a-hjkmnp-tv-z]{10}$")
 DEMAND_RESOLUTION = 5  # hexagons of about 250 km²; nothing finer is ever stored
 MAX_BODY = 4096
+ADMIN_ORIGINS = {o.strip() for o in os.environ.get("PSST_ADMIN_ORIGINS", "https://psst.zigao.wang").split(",")}
 ADMIN_RUN_DIR = os.environ.get("PSST_ADMIN_RUN_DIR", "/www/wwwroot/psst/run")
 ADMIN_ACTIONS = {"/internal/admin-refresh": "admin-refresh", "/internal/admin-check": "check",
                  "/internal/admin-publish": "publish", "/internal/admin-rollback": "rollback"}
@@ -43,6 +44,18 @@ def connection() -> psycopg.Connection:
                                application_name="psst-api")
         _local.conn = conn
     return conn
+
+
+def admin_request_allowed(headers) -> bool:
+    """The admin page's buttons send X-Psst-Admin, which a form or link on another site can't, and a browser
+    asking from another site says so in Origin or Sec-Fetch-Site. Basic auth alone isn't enough, because
+    browsers resend a remembered login to any page that asks."""
+    if headers.get("X-Psst-Admin") != "1":
+        return False
+    origin = headers.get("Origin")
+    if origin and origin.rstrip("/") not in ADMIN_ORIGINS:
+        return False
+    return headers.get("Sec-Fetch-Site", "same-origin") == "same-origin"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -73,6 +86,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         action = ADMIN_ACTIONS.get(self.path)
         if action:
+            if not admin_request_allowed(self.headers):
+                return self._reply(403, {"error": "only the admin page can ask for this"})
             # Only reachable through nginx's /admin/<action>, behind the admin login. It leaves a request that
             # server/admin-actions.sh carries out within a minute.
             path = os.path.join(ADMIN_RUN_DIR, action)
@@ -85,7 +100,10 @@ class Handler(BaseHTTPRequestHandler):
                 log.exception("couldn't write the %s request", action)
                 return self._reply(503, {"error": "try again later"})
             return self._reply(202, {"status": "queued"})
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._reply(400, {"error": "invalid Content-Length"})
         if length <= 0 or length > MAX_BODY:
             return self._reply(413, {"error": "body too large or empty"})
         try:

@@ -128,6 +128,9 @@ const fmt = n => Number(n || 0).toLocaleString("en-US");
 const badge = (s, extra = "") => `<span class="badge ${esc(s)}">${esc(extra || s)}</span>`;
 const img = file => `/images/${file}`;
 
+// The server refuses button requests without this header, so other sites can't press the buttons.
+const ADMIN_HEADERS = {"X-Psst-Admin": "1"};
+
 // Asks the server to rebuild the data now instead of at the next 10-minute rebuild, then waits for it.
 async function refresh() {
   const button = document.getElementById("refresh");
@@ -135,7 +138,7 @@ async function refresh() {
   button.disabled = true;
   button.textContent = "Refreshing…";
   try {
-    const res = await fetch(new URL("refresh", location.origin + location.pathname), {method: "POST"});
+    const res = await fetch(new URL("refresh", location.origin + location.pathname), {method: "POST", headers: ADMIN_HEADERS});
     if (!res.ok) throw new Error(`the server answered ${res.status}`);
     // The server picks up the request within a minute and the rebuild takes about 15 seconds.
     for (let i = 0; i < 36; i++) {
@@ -559,7 +562,7 @@ async function adminAction(action) {
   if (question && !confirm(question)) return;
   document.querySelectorAll("#publish-button, #check-button, #rollback-button").forEach(b => b.disabled = true);
   const note = document.getElementById("action-note");
-  const res = await fetch(new URL(action, location.origin + location.pathname), {method: "POST"});
+  const res = await fetch(new URL(action, location.origin + location.pathname), {method: "POST", headers: ADMIN_HEADERS});
   note.textContent = res.ok ? "Asked. The server starts within a minute." : res.status === 409 ? "Already asked; it starts within a minute." : `The server answered ${res.status}.`;
   pollAction(Date.now());
 }
