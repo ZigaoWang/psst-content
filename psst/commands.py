@@ -1152,6 +1152,11 @@ def publish_command(args) -> int:
             "SELECT id FROM images WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
         reviewed_guides = [] if args.no_new_facts else [r["id"] for r in conn.execute(
             "SELECT id FROM guides WHERE state = 'reviewed' AND NOT needs_review ORDER BY id")]
+        from . import guides
+        reviewed_guides, held = guides.publishable(conn, reviewed_guides)
+        if held:
+            print("Guides wait until every live place in the city has an approved one: " + ", ".join(held)
+                  + " (psst guide progress).")
         # A place goes live only with its guide: stories for a place that isn't live yet wait until its
         # guide is reviewed too.
         waiting = {r["id"] for r in conn.execute("""
@@ -1192,7 +1197,6 @@ def publish_command(args) -> int:
         # Likewise a reviewed guide for a place with no published story yet.
         conn.execute("UPDATE guides SET state = 'published', published_at = now() "
                      "WHERE id = ANY(%s) AND state = 'reviewed'", (result.guides,))
-        from . import guides
         guides.retire_replaced(conn, result.guides)
         conn.execute("INSERT INTO publications (channel, content_version, manifest, places, facts, run_id) "
                      "VALUES ('production', %s, %s, %s, %s, %s)",

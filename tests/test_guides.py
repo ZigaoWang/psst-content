@@ -285,3 +285,17 @@ def test_suggested_identifier_and_echoes():
                                "Bevis Marks Synagogue")
     assert "P138" not in [k.property for k in found]
     assert guides.suggest_identifier(entity, values, found) == "Neoclassical synagogue, 1701, by Joseph Avis"
+
+
+def test_the_info_box_shows_the_most_useful_facts_in_order():
+    lines = [{"property": p, "label": p, "value": "x"} for p in
+             ["P138", "P170", "P571", "P140", "P2044", "P149", "P1435", "P2048", "P186", "P1101"]]
+    assert [k["property"] for k in guides.shown(lines)] == ["P170", "P571", "P149", "P186", "P2048", "P1435"]
+
+
+def test_a_city_gets_its_guides_all_at_once(scratch, place):
+    # Almost every live place has no guide yet, so a single reviewed guide waits for the rest of its city.
+    _, guide_id = write_guide(scratch, place)
+    scratch.execute("UPDATE guides SET state = 'reviewed', reviewed_at = now() WHERE id = %s", (guide_id,))
+    kept, held = guides.publishable(scratch, [guide_id])
+    assert kept == [] and held

@@ -525,7 +525,7 @@ The About has its own rules, different from a story's:
 - an architect or creator born after the place was built, or who died long before it;
 - a "style" that isn't recorded on Wikidata as a style (vandalism looks like this).
 
-Key facts that add nothing are left out by the tools: a "named after" that only repeats the place's name. Religion and operator aren't shown at all (the identifier says "church", and operators change). Delete any other key fact that doesn't fit; you can't add or change one. If Wikidata itself is wrong, leave the value out and, if you like, fix Wikidata separately.
+The app shows at most six key facts per place, the most useful first (maker, dates, style, heritage status, height, material, then the rest), so a famous building's box stays as short as a pub's. Key facts that add nothing are left out by the tools: a "named after" that only repeats the place's name. Religion and operator aren't shown at all (the identifier says "church", and operators change). Delete any other key fact that doesn't fit; you can't add or change one. If Wikidata itself is wrong, leave the value out and, if you like, fix Wikidata separately.
 
 ### Adding guide information
 
@@ -689,7 +689,7 @@ This one command:
 3. Uploads to **staging** and downloads it back exactly as the app would, checking every hash, every reference (places to areas, facts to tags), that every new photo file is served, every old place id, and that the number of places and facts hasn't dropped by more than 2 percent.
 4. Only if all of that passes, promotes staging to **production** by switching one file atomically. Reviewed facts, photos, and guides become `published`, and finished cells become `done`.
 
-A place goes live only with its guide: reviewed stories for a place that isn't live yet wait until its guide is reviewed too.
+A place goes live only with its guide: reviewed stories for a place that isn't live yet wait until its guide is reviewed too. And a city's guides go live together: reviewed guides wait until every live place in that city has an approved one, so readers never see half a city with About sections and half without. `psst publish` names the cities it held back, and `psst guide progress` shows what's missing.
 
 If any check fails, production is untouched and the problems are listed. Apps keep the last good version they have, and they never switch to a download that doesn't check out.
 

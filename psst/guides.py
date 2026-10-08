@@ -50,6 +50,12 @@ PROPERTIES: list[tuple[str, str, str]] = [
 PROPERTY = {p: (label, kind) for p, label, kind in PROPERTIES}
 BUILT_LABEL = {"memorial": "Made", "culture": "Founded", "green": "Established"}
 
+# The info box shows at most this many lines, chosen by PRIORITY and shown in PROPERTIES order, so a famous
+# building's box is no longer than the facts a reader looks for first.
+KEY_FACTS_SHOWN = 6
+PRIORITY = ["P170", "P84", "P571", "P1619", "P149", "P1435", "P2048", "P186", "P547", "P825", "P1083", "P2043",
+            "P2046", "P1101", "P2044", "P631", "P193", "P88", "P138"]
+
 # Units Wikidata uses for lengths and areas, converted to meters, kilometers, square meters, and hectares.
 UNITS = {
     "Q11573": ("m", 1.0), "Q828224": ("km", 1.0), "Q174728": ("m", 0.01), "Q3710": ("m", 0.3048),
@@ -732,6 +738,33 @@ def apply_decisions(conn, decisions: list[dict], run: dict) -> dict[str, int]:
                              (guide_id, list(decision["confirmKeyFacts"])))
         counts[choice] += 1
     return counts
+
+
+def shown(key_facts: list[dict]) -> list[dict]:
+    """The key fact lines to show (each line one property): the KEY_FACTS_SHOWN with the highest PRIORITY, kept
+    in display order. Properties no longer shown at all (religion, operator) are dropped."""
+    rank = {p: i for i, p in enumerate(PRIORITY)}
+    chosen = sorted((k for k in key_facts if k["property"] in rank), key=lambda k: rank[k["property"]])[:KEY_FACTS_SHOWN]
+    order = {p: i for i, (p, _, _) in enumerate(PROPERTIES)}
+    return sorted(chosen, key=lambda k: order[k["property"]])
+
+
+def publishable(conn, guide_ids: list[str]) -> tuple[list[str], list[str]]:
+    """The reviewed guides that can go live now, and the cities held back. A city's guides go live together,
+    once every place live there has an approved guide, so readers never see half a city with guides."""
+    rows = conn.execute("""
+        WITH live AS (
+            SELECT p.id, coalesce(p.city_id, p.region_id) AS city FROM places p
+            WHERE p.state = 'active' AND EXISTS (SELECT 1 FROM facts f WHERE f.place_id = p.id AND f.state = 'published'))
+        SELECT live.city, a.name,
+               bool_and(EXISTS (SELECT 1 FROM guides g WHERE g.place_id = live.id
+                                AND (g.state = 'published' OR g.id = ANY(%(ids)s::text[])))) AS complete
+        FROM live LEFT JOIN admin_areas a ON a.id = live.city GROUP BY live.city, a.name""", {"ids": guide_ids}).fetchall()
+    held = {r["city"] for r in rows if not r["complete"]}
+    kept = [r["id"] for r in conn.execute("""
+        SELECT g.id FROM guides g JOIN places p ON p.id = g.place_id
+        WHERE g.id = ANY(%s::text[]) AND NOT (coalesce(p.city_id, p.region_id) = ANY(%s::bigint[]))""", (guide_ids, list(held)))]
+    return kept, sorted(r["name"] or str(r["city"]) for r in rows if not r["complete"])
 
 
 def retire_replaced(conn, published: list[str]) -> int:

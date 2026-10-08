@@ -169,7 +169,7 @@ def build(conn, out_root: Path, include: list[str] = (), include_images: list[st
                 key_facts.append({"property": k["property"], "label": k["label"], "value": k["value"],
                                   "values": [{"value": k["value"], "id": k["valueId"]}]})
         return {"id": g["id"], "identifier": g["identifier"], "about": g["about"], "sources": g["sources"],
-                "keyFacts": key_facts, "wikidataId": g["wikidata_id"],
+                "keyFacts": guides.shown(key_facts), "wikidataId": g["wikidata_id"],
                 "lastVerified": g["last_verified_at"].date().isoformat() if g["last_verified_at"] else None}
 
     by_group: dict[int, list[dict]] = {}
