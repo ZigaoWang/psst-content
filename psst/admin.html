@@ -23,6 +23,8 @@
            border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
   header h1 { font-size: 17px; margin: 0; }
   header .meta { color: var(--muted); font-size: 12px; }
+  #refresh { padding: 3px 10px; font-size: 12px; }
+  #refresh:disabled { opacity: .6; cursor: default; }
   nav { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
   nav a { padding: 5px 10px; border-radius: 7px; color: var(--text); font-weight: 500; }
   nav a.on { background: var(--text); color: var(--panel); text-decoration: none; }
@@ -105,6 +107,7 @@
 <header>
   <h1>Psst admin</h1>
   <span class="meta" id="meta">Loading…</span>
+  <button id="refresh" onclick="refresh()" title="Rebuild the data from the database">Refresh</button>
   <nav id="nav"></nav>
 </header>
 <main id="main"></main>
@@ -122,20 +125,51 @@ const fmt = n => Number(n || 0).toLocaleString("en-US");
 const badge = (s, extra = "") => `<span class="badge ${esc(s)}">${esc(extra || s)}</span>`;
 const img = file => `/images/${file}`;
 
-async function load() {
+// Asks the server to rebuild the data now instead of at the next 10-minute rebuild, then waits for it.
+async function refresh() {
+  const button = document.getElementById("refresh");
+  const before = D?.generatedAt;
+  button.disabled = true;
+  button.textContent = "Refreshing…";
+  try {
+    const res = await fetch(new URL("refresh", location.origin + location.pathname), {method: "POST"});
+    if (!res.ok) throw new Error(`the server answered ${res.status}`);
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 6000));
+      const data = await fetchData();
+      if (data.generatedAt !== before) { show(data); route(); button.textContent = "Refresh"; button.disabled = false; return; }
+    }
+    throw new Error("it took longer than 3 minutes");
+  } catch (e) {
+    button.textContent = "Refresh failed";
+    button.title = String(e);
+    setTimeout(() => { button.textContent = "Refresh"; button.disabled = false; }, 4000);
+  }
+}
+
+async function fetchData() {
   // Built from the origin, so a login typed into the address bar doesn't end up in the request.
   const res = await fetch(new URL("data.json.gz", location.origin + location.pathname), {cache: "no-cache"});
   if (!res.ok) throw new Error(`the data file answered ${res.status}`);
-  const text = await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).text();
-  D = JSON.parse(text);
+  return JSON.parse(await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).text());
+}
+
+async function load() {
+  show(await fetchData());
+  route();
+}
+
+function show(data) {
+  D = data;
+  byPlace = {}; factsByPlace = {}; imagesByPlace = {}; guidesByPlace = {};
   for (const p of D.places) byPlace[p.id] = p;
   for (const f of D.facts) (factsByPlace[f.place_id] ||= []).push(f);
   for (const i of D.images) (imagesByPlace[i.place_id] ||= []).push(i);
   for (const g of D.guides || []) (guidesByPlace[g.place_id] ||= []).push(g);
   const live = D.publications[0];
   document.getElementById("meta").textContent =
-    `Data from ${D.generatedAt}` + (live ? ` · live version ${live.version}, published ${live.at} UTC` : "");
-  route();
+    `Updated ${D.generatedAt}` + (live ? ` · App content published ${live.at} UTC` : "");
+  document.getElementById("meta").title = live ? `Live version ${live.version}` : "";
 }
 
 function route() {
@@ -171,15 +205,15 @@ function stack(parts, title) {
 // What's happening right now: open runs, with how long since each last did anything.
 function activityPanel() {
   const open = D.runs.filter(r => !r.finished);
-  if (!open.length) return `<div class="empty">Nothing is running.</div>`;
+  if (!open.length) return `<div class="empty">Nothing running.</div>`;
   return `<table><tr><th>Session</th><th>Model</th><th>Started (UTC)</th><th>Last activity</th><th>Done so far</th></tr>
     ${open.map(r => {
       const live = r.idle_minutes < 30;
-      return `<tr><td><span class="live ${live ? "" : "stalled"}" title="${live ? "active in the last 30 minutes" : "no activity for a while: stalled or stopped"}"></span>
+      return `<tr><td><span class="live ${live ? "" : "stalled"}" title="${live ? "Active in the last 30 minutes" : "No activity in the last 30 minutes"}"></span>
           <b>${esc(r.notes || r.kind)}</b><div class="small muted">${esc(r.kind)} · ${r.id}</div></td>
         <td class="small">${esc(r.model || r.operator)}</td><td class="small">${esc(r.started)}</td>
         <td class="small">${esc(r.last_activity)}${live ? "" : ` ${badge("draft", "stalled " + ago(r.idle_minutes))}`}</td>
-        <td class="small">${runSummary(r) || "starting"}${reviewHealth(r)}</td></tr>`;
+        <td class="small">${runSummary(r) || "Nothing yet"}${reviewHealth(r)}</td></tr>`;
     }).join("")}</table>`;
 }
 const plural = (n, one, many = one + "s") => `${fmt(n)} ${n === 1 ? one : many}`;
@@ -188,8 +222,8 @@ const ago = m => m < 90 ? `${Math.round(m)} min` : m < 2880 ? `${Math.round(m / 
 // Per city: are its stories checked, does every place have guide information, how many have photos.
 function readinessPanel() {
   const rows = D.cities.filter(c => c.story_places || c.live_places);
-  return legend([[C.good, "verified, or live"], [C.pending, "waiting for review"], [C.weak, "live but never verified"],
-                 [C.missing, "missing"]]) + `<div class="ready">${rows.map(c => {
+  return legend([[C.good, "Done (verified or live)"], [C.pending, "Waiting for review"], [C.weak, "Live, not verified"],
+                 [C.missing, "Not written"]]) + `<div class="ready">${rows.map(c => {
     return `<div class="card"><h3>${esc(c.city)} <span class="muted small">${fmt(c.live_places)} live places</span></h3>
       <div class="row"><span>Stories</span>${stack([[c.verified, C.good], [c.waiting, C.pending], [c.unverified, C.weak]],
         `${c.verified} verified, ${c.waiting} waiting for review, ${c.unverified} live but never verified`)}
@@ -211,9 +245,9 @@ function readinessPanel() {
 function reviewHealth(r) {
   if (r.kind !== "review" || !r.facts_reviewed) return "";
   const warn = [];
-  if (r.facts_reviewed >= 40 && !r.facts_rejected && !r.facts_edited) warn.push("approved everything");
+  if (r.facts_reviewed >= 40 && !r.facts_rejected && !r.facts_edited) warn.push("no edits or rejections");
   if (r.distinct_notes < r.facts_reviewed * 0.9) warn.push("repeated notes");
-  if (r.sources_read < r.facts_reviewed * 0.8) warn.push("few sources opened");
+  if (r.sources_read < r.facts_reviewed * 0.8) warn.push("fewer sources read than stories");
   return warn.length ? `<div>${warn.map(w => badge("flagged", w)).join(" ")}</div>` : "";
 }
 
@@ -230,20 +264,19 @@ function renderOverview() {
   ${readinessPanel()}
   <h2>Totals</h2>
   <div class="cards">
-    ${card(fmt(t.live_places), "places live in the app", "places")}
-    ${card(fmt(t.facts.published), "published stories", "places")}
-    ${card(fmt(waiting), `waiting for review (${t.facts.draft} draft, ${t.facts.reviewed} approved, ${t.flagged} flagged, ${t.photos.draft + t.photos.reviewed} photos)`, "review")}
-    ${card(`${pct(t.places_with_guides, t.live_places)}`, `of live places have guide information (${fmt(t.places_with_guides)} of ${fmt(t.live_places)}; ${fmt(t.guides.draft + t.guides.reviewed)} waiting)`, "review")}
-    ${card(`${pct(t.places_with_photos, t.live_places)}`, `of live places have a photo (${fmt(t.places_with_photos)} of ${fmt(t.live_places)})`, "photos")}
-    ${card(fmt(t.open_reports), "open problem reports", "reports")}
-    ${card(`${pct(t.migrated_verified, t.migrated_published)}`, `of migrated stories verified (${fmt(t.migrated_verified)} of ${fmt(t.migrated_published)})`)}
+    ${card(fmt(t.live_places), "Live places", "places")}
+    ${card(fmt(t.facts.published), "Live stories", "places")}
+    ${card(fmt(waiting), `Waiting for review: ${fmt(t.facts.draft)} drafts, ${fmt(t.facts.reviewed)} approved, ${fmt(t.flagged)} flagged, ${fmt(t.photos.draft + t.photos.reviewed)} photos`, "review")}
+    ${card(`${fmt(t.places_with_guides)} of ${fmt(t.live_places)}`, `Live places with a guide. ${fmt(t.guides.draft + t.guides.reviewed)} guides waiting.`, "review")}
+    ${card(`${fmt(t.places_with_photos)} of ${fmt(t.live_places)}`, "Live places with a photo", "photos")}
+    ${card(fmt(t.open_reports), "Open problem reports", "reports")}
+    ${card(`${fmt(t.migrated_verified)} of ${fmt(t.migrated_published)}`, "Old stories verified")}
   </div>
 
   <h2>Cities</h2>
-  <p class="small muted">Research cells are hexagons of about 5 km². <b>Done</b> and <b>Partly</b> count cells swept for every
-    place worth a story. <b>Old content only</b> cells have places from the original content files but have never been
-    swept, so they're accurate but thin: <code>seed &lt;city&gt;</code> fills them in. <b>Verified</b> is the share of live
-    stories checked against their sources.</p>
+  <p class="small muted">Research cells are hexagons of about 5 km². <b>Done:</b> every lead handled. <b>Partly:</b> leads left
+    for another pass. <b>Old content only:</b> places from the original files, never researched cell by cell. <b>Verified:</b>
+    live stories checked against their sources.</p>
   <table>
     <tr><th>City</th><th>Research cells</th><th class="num" title="Every lead handled">Done</th>
         <th class="num" title="Researched, with leads left for another pass">Partly</th>
@@ -280,7 +313,7 @@ function renderOverview() {
         <tr><td>Warnings</td><td>${esc(b.warnings)}</td></tr>
         <tr><td>Backup size</td><td>${fmt(Math.round(b.export_bytes / 1e6))} MB of CSV, ${fmt(Math.round(b.dump_bytes / 1e6))} MB dump</td></tr>
         <tr><td>Disk free</td><td>${fmt(Math.round(b.disk_free_bytes / 1e9))} GB</td></tr></table>`
-        : `<div class="empty">Backup status is only available when this page is built on the server.</div>`}
+        : `<div class="empty">Shown only when the page is built on the server.</div>`}
       <h2>Recent work</h2>
       <table><tr><th>When</th><th>Kind</th><th>Did</th></tr>
       ${D.runs.slice(0, 8).map(r => `<tr><td class="small">${esc(r.started)}</td><td>${esc(r.kind)}</td><td class="small">${runSummary(r)}</td></tr>`).join("")}</table>
@@ -386,7 +419,7 @@ function openPlace(id) {
     ${guides.map(guideBlock).join("") || `<div class="empty">No guide information yet.<br><code>uv run psst guide prepare --place ${p.id}</code></div>`}
     <h2>Photos</h2>
     ${photos.length ? `<div class="thumbs">${photos.map(photoFigure).join("")}</div>`
-      : `<div class="empty">No photo yet. The app shows the map and Look Around.<br><code>uv run psst images find --place ${p.id}</code></div>`}
+      : `<div class="empty">No photo.<br><code>uv run psst images find --place ${p.id}</code></div>`}
     <h2>Stories (${facts.length})</h2>
     ${facts.map(factBlock).join("") || `<div class="empty">No stories.</div>`}`;
   drawer.classList.add("on");
@@ -481,8 +514,7 @@ function renderReview() {
   const photos = D.images.filter(i => i.state === "draft" || i.state === "reviewed" || (i.needs_review && i.state !== "retired"));
   const guides = (D.guides || []).filter(g => g.state === "draft" || g.state === "reviewed" || (g.needs_review && g.state !== "retired"));
   const label = f => f.needs_review && f.state === "published" ? badge("flagged") : badge(f.state, f.state === "reviewed" ? "approved, not published" : f.state);
-  return `<p class="muted">Stories, guide information, and photos waiting for a review run, or approved and waiting for <code>psst publish</code>.
-    Reviewing happens in a Claude Code session: <code>review</code>.</p>
+  return `<p class="muted">Waiting for a review run, or approved and waiting for <code>psst publish</code>.</p>
     <h2>Stories (${waiting.length})</h2>
     ${waiting.length ? `<table><tr><th>Story</th><th>Place</th><th>State</th><th>Written</th></tr>
       ${waiting.map(f => `<tr class="click" onclick="location.hash='place/${f.place_id}'"><td><b>${esc(f.headline)}</b>
@@ -549,15 +581,13 @@ function renderReports() {
       <td>${badge(r.state)}</td><td>${esc(r.reason)}</td><td>${esc(r.message || "")}</td>
       <td><b>${esc(r.headline)}</b><div class="small muted">${esc(byPlace[r.place_id]?.name)}</div></td>
       <td class="small">${esc(r.app_version || "")}</td></tr>`).join("")}</table>`
-    : `<div class="empty">No problem reports yet. When a reader reports a story in the app, it appears here and the story is flagged for review.</div>`;
+    : `<div class="empty">No problem reports. A report from the app shows here and flags its story for review.</div>`;
 }
 
 function renderRuns() {
   const status = r => r.finished ? badge("done", "finished") : r.idle_minutes < 30 ? `<span class="live"></span>running` : badge("draft", "stalled");
-  return `<p class="muted">Every batch of work. For reviews, the bar shows how each story was decided; a careful review edits and
-    rejects a real share. Badges mark reviews that look careless.</p>
-    ${legend([[C.good, "approved as written"], [C.pending, "edited, then approved"], [C.missing, "rejected"]])}
-    <table><tr><th>Started (UTC)</th><th>Status</th><th>Kind</th><th>Model</th><th>Did</th><th>Review decisions</th><th>Notes</th></tr>
+  return `${legend([[C.good, "Approved"], [C.pending, "Edited"], [C.missing, "Rejected"]])}
+    <table><tr><th>Started (UTC)</th><th>Status</th><th>Kind</th><th>Model</th><th>Output</th><th>Review decisions</th><th>Notes</th></tr>
     ${D.runs.map(r => {
       const approved = r.facts_reviewed - r.facts_edited - r.facts_rejected;
       return `<tr><td class="small">${esc(r.started)}</td><td class="small">${status(r)}</td><td>${esc(r.kind)}</td>
@@ -570,11 +600,11 @@ function renderRuns() {
 }
 
 function renderDemand() {
-  return `<p class="muted">Areas people looked at in the app while Psst had nothing there, over the last 90 days. Each is a
-    hexagon of about 250 km². Research goes to the most-viewed first. <a href="map.html" target="_blank">See them on the map</a>.</p>
+  return `<p class="muted">Empty areas people looked at in the app in the last 90 days, as hexagons of about 250 km². Research
+    starts with the most viewed. <a href="map.html" target="_blank">Map</a></p>
     ${D.demand.length ? `<table><tr><th>Area (H3 cell)</th><th class="num">Views</th><th>Last seen</th></tr>
       ${D.demand.map(d => `<tr><td>${esc(d.cell)}</td><td class="num">${fmt(d.views)}</td><td>${esc(d.last_day)}</td></tr>`).join("")}</table>`
-      : `<div class="empty">No requests yet. They arrive once people use the app outside the cities Psst covers.</div>`}`;
+      : `<div class="empty">No views of empty areas yet.</div>`}`;
 }
 
 function renderMap() {

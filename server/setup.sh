@@ -7,6 +7,8 @@ mkdir -p "$base/public/content/staging/v2/packs" "$base/public/content/productio
          "$base/public/content/production/v2/history" "$base/public/privacy" "$base/public/coverage" "$base/backup"
 id psst >/dev/null 2>&1 || useradd --system --home "$base" --shell /usr/sbin/nologin psst
 chmod 755 "$base" "$base/public"
+# Where the admin page's Refresh button leaves a rebuild request for cron (server/api.py).
+install -d -o psst -g psst -m 755 "$base/run"
 cp -R server/public/. "$base/public/"
 
 # The API connects with the psst_api role, which can only file reports and demand signals.

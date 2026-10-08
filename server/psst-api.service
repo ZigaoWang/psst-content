@@ -14,6 +14,8 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadOnlyPaths=/www/wwwroot/psst/app
+# Where the admin page's refresh button leaves its request.
+ReadWritePaths=/www/wwwroot/psst/run
 
 [Install]
 WantedBy=multi-user.target

@@ -1,7 +1,10 @@
-"""The Psst API: two endpoints, both write-only and anonymous.
+"""The Psst API: two public endpoints, both write-only and anonymous, and one for the admin page.
 
     POST /api/v1/reports  {"factId": "fa_...", "reason": "wrong", "message": "...", "appVersion": "1.1 (7)"}
     POST /api/v1/demand   {"cell": "85194ad3fffffff"}   (an H3 resolution 5 cell of an empty map view)
+
+    POST /internal/admin-refresh   asks for the admin page to be rebuilt now (nginx serves it at /admin/refresh,
+                                   behind the admin login; it's never reachable from /api/)
 
 It runs behind nginx (which rate limits and caps request size) on 127.0.0.1:8787, connects as the
 psst_api role, and can only call psst.submit_report and psst.record_demand. It stores no IP addresses
@@ -24,6 +27,7 @@ REASONS = {"wrong", "outdated", "location", "offensive", "other"}
 FACT_ID = re.compile(r"^fa_[0-9a-hjkmnp-tv-z]{10}$")
 DEMAND_RESOLUTION = 5  # hexagons of about 250 km²; nothing finer is ever stored
 MAX_BODY = 4096
+REFRESH_REQUEST = os.environ.get("PSST_ADMIN_REFRESH_REQUEST", "/www/wwwroot/psst/run/admin-refresh")
 
 log = logging.getLogger("psst-api")
 _local = threading.local()
@@ -64,6 +68,16 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/internal/admin-refresh":
+            # Only reachable through nginx's /admin/refresh, behind the admin login. It leaves a request that the
+            # server picks up within a minute (server/psst-backup.cron) to rebuild the admin page.
+            try:
+                with open(REFRESH_REQUEST, "w") as request:
+                    request.write("refresh\n")
+            except OSError:
+                log.exception("couldn't write the refresh request")
+                return self._reply(503, {"error": "try again later"})
+            return self._reply(202, {"status": "queued"})
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > MAX_BODY:
             return self._reply(413, {"error": "body too large or empty"})
