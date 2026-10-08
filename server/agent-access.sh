@@ -28,9 +28,9 @@ ALTER ROLE psst_agent WITH LOGIN PASSWORD '$password' NOSUPERUSER NOCREATEDB NOC
 GRANT CONNECT, TEMPORARY ON DATABASE psst TO psst_agent;
 GRANT USAGE ON SCHEMA psst TO psst_agent;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA psst TO psst_agent;
-REVOKE UPDATE ON psst.fact_events, psst.image_events FROM psst_agent;
+REVOKE UPDATE ON psst.fact_events, psst.image_events, psst.guide_events FROM psst_agent;
 GRANT DELETE ON psst.fact_sources, psst.fact_tags, psst.tag_labels, psst.tags, psst.place_names,
-              psst.admin_area_names TO psst_agent;
+              psst.admin_area_names, psst.guide_sources, psst.guide_key_facts, psst.guide_claims TO psst_agent;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA psst TO psst_agent;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA psst TO psst_agent;
 GRANT SELECT ON public.psst_schema_migrations TO psst_agent;
