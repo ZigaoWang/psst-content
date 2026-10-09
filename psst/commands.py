@@ -1135,6 +1135,16 @@ def guide_progress(args) -> int:
     return 0
 
 
+@command("guide reopen", "Send a guide review run's approvals back to review, after a spot check found it careless.",
+         arg("review_run"), arg("--reason", required=True, help="what the spot check found (kept in each guide's history)"))
+def guide_reopen(args) -> int:
+    from . import guides
+    with db.connect(actor="review", note=f"Review reopened: {args.reason}") as conn:
+        counts = guides.reopen(conn, args.review_run)
+    print(f"{counts['back_to_review']} guides back in the review queue; {counts['live_flagged']} live guides flagged.")
+    return 0
+
+
 @command("guide sample", "Write a random sample of a review run's approvals to a file, for a second reviewer to check.",
          arg("review_run", help="the review run to audit"), arg("--out", required=True),
          arg("--limit", type=int, default=30))

@@ -772,6 +772,18 @@ def publishable(conn, guide_ids: list[str]) -> tuple[list[str], list[str]]:
     return kept, sorted(r["name"] or str(r["city"]) for r in rows if not r["complete"])
 
 
+def reopen(conn, review_run: str) -> dict[str, int]:
+    """Undo a review run that a spot check showed wasn't careful enough: guides it approved or edited go back to
+    review (its edits stay, as the text a new reviewer checks); ones it rejected stay rejected and can be written
+    again. Guides already published stay live and count as unverified until reviewed again."""
+    back = conn.execute("""UPDATE guides SET state = 'draft', reviewed_at = NULL, reviewed_by = NULL, review_run = NULL,
+                               review_notes = NULL, last_verified_at = NULL
+                           WHERE review_run = %s AND state = 'reviewed' RETURNING id""", (review_run,)).fetchall()
+    live = conn.execute("""UPDATE guides SET needs_review = true, last_verified_at = NULL
+                           WHERE review_run = %s AND state = 'published' RETURNING id""", (review_run,)).fetchall()
+    return {"back_to_review": len(back), "live_flagged": len(live)}
+
+
 def sample(conn, review_run: str, limit: int) -> list[dict]:
     """A random sample of what a review run approved or edited, for a second reviewer to check. Anything found
     wrong goes back to review with `psst guide flag`."""

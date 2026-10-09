@@ -309,3 +309,15 @@ def test_a_review_run_can_be_spot_checked(scratch, place):
                                       "notes": "Example Society page confirms the 1840s column."}], reviewer)
     assert [g["id"] for g in guides.sample(scratch, reviewer["id"], 10)] == [guide_id]
     assert [r["live"] + r["approved"] + r["in_review"] + r["missing"] >= 0 for r in guides.progress(scratch)]
+
+
+def test_a_careless_guide_review_can_be_reopened(scratch, place):
+    _, guide_id = write_guide(scratch, place)
+    reviewer = start(scratch, "review", "test-reviewer")
+    read(scratch, reviewer["id"], SOURCE["url"])
+    guides.apply_decisions(scratch, [{"guide": guide_id, "decision": "approve",
+                                      "notes": "Example Society page confirms the 1840s column."}], reviewer)
+    assert guides.reopen(scratch, reviewer["id"]) == {"back_to_review": 1, "live_flagged": 0}
+    row = scratch.execute("SELECT state, review_run FROM guides WHERE id = %s", (guide_id,)).fetchone()
+    assert row["state"] == "draft" and row["review_run"] is None
+    assert guide_id in [g["id"] for g in guides.queue(scratch, 100000)]
