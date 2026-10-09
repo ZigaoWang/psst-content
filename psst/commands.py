@@ -1128,8 +1128,23 @@ def guide_progress(args) -> int:
     from . import guides
     with db.connect() as conn:
         rows = guides.progress(conn)
+    print(f"{'city':<22} {'places':>6} {'live':>6} {'approved':>9} {'in review':>10} {'no guide':>9}")
     for r in rows:
-        print(f"{r['city']:<16} {r['live']:>5} of {r['places']:>5} places live, {r['waiting']:>5} waiting for review")
+        print(f"{r['city']:<22} {r['places']:>6} {r['live']:>6} {r['approved']:>9} {r['in_review']:>10} {r['missing']:>9}")
+    print("approved: waiting for psst publish. no guide: never written or rejected; psst guide prepare picks these up.")
+    return 0
+
+
+@command("guide sample", "Write a random sample of a review run's approvals to a file, for a second reviewer to check.",
+         arg("review_run", help="the review run to audit"), arg("--out", required=True),
+         arg("--limit", type=int, default=30))
+def guide_sample(args) -> int:
+    from . import guides
+    with db.connect() as conn:
+        rows = guides.sample(conn, args.review_run, args.limit)
+    Path(args.out).write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"Wrote {len(rows)} of {args.review_run}'s approved guides to {args.out}. Send any that are wrong back to "
+          "review with psst guide flag <id> --reason \"...\".")
     return 0
 
 

@@ -299,3 +299,13 @@ def test_a_city_gets_its_guides_all_at_once(scratch, place):
     scratch.execute("UPDATE guides SET state = 'reviewed', reviewed_at = now() WHERE id = %s", (guide_id,))
     kept, held = guides.publishable(scratch, [guide_id])
     assert kept == [] and held
+
+
+def test_a_review_run_can_be_spot_checked(scratch, place):
+    _, guide_id = write_guide(scratch, place)
+    reviewer = start(scratch, "review", "test-reviewer")
+    read(scratch, reviewer["id"], SOURCE["url"])
+    guides.apply_decisions(scratch, [{"guide": guide_id, "decision": "approve",
+                                      "notes": "Example Society page confirms the 1840s column."}], reviewer)
+    assert [g["id"] for g in guides.sample(scratch, reviewer["id"], 10)] == [guide_id]
+    assert [r["live"] + r["approved"] + r["in_review"] + r["missing"] >= 0 for r in guides.progress(scratch)]

@@ -575,7 +575,7 @@ Write `work/guides/decisions.json`, one decision per guide:
 - Notes are required, say what you checked for that place, and can't be repeated across decisions.
 - `uv run psst guide apply work/guides/decisions.json --dry-run --run <run id>`, fix anything it reports, then apply. `psst publish` puts approved guides in the app, retiring the guide each one replaces.
 
-`uv run psst guide progress` shows how many places have guide information, per city. `uv run psst guide flag <id> --reason "..."` sends a published guide back for review.
+`uv run psst guide progress` shows, per city, how many places have a guide live, approved and waiting for publish, in review, or none at all (never written or rejected; `psst guide prepare` picks these up). To spot-check a review, `uv run psst guide sample <review run> --out work/guides/sample.json` writes a random sample of what it approved; check each one as above and send any that are wrong back with `psst guide flag`. `uv run psst guide flag <id> --reason "..."` sends a published guide back for review.
 
 ## 14. Photos
 

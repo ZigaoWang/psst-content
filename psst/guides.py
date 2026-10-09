@@ -772,6 +772,13 @@ def publishable(conn, guide_ids: list[str]) -> tuple[list[str], list[str]]:
     return kept, sorted(r["name"] or str(r["city"]) for r in rows if not r["complete"])
 
 
+def sample(conn, review_run: str, limit: int) -> list[dict]:
+    """A random sample of what a review run approved or edited, for a second reviewer to check. Anything found
+    wrong goes back to review with `psst guide flag`."""
+    return _guide_rows(conn, """g.review_run = %(run)s AND g.state IN ('reviewed', 'published')
+        ORDER BY random() LIMIT %(limit)s""", {"run": review_run, "limit": limit})
+
+
 def retire_replaced(conn, published: list[str]) -> int:
     """Once a new guide is live, the one it replaced is retired (kept, with the reason)."""
     rows = conn.execute("""
@@ -782,13 +789,16 @@ def retire_replaced(conn, published: list[str]) -> int:
 
 
 def progress(conn) -> list[dict]:
-    """Per city: places with stories, and how many have a guide live, waiting, or none."""
-    return conn.execute("""
+    """Per city: places with stories, and where each one's guide stands: live, approved and waiting for publish,
+    waiting for review, or none at all (never written, or rejected)."""
+    state = lambda s: f"EXISTS (SELECT 1 FROM guides g WHERE g.place_id = p.id AND g.state = '{s}')"
+    return conn.execute(f"""
         SELECT coalesce(ci.name, '(no city)') AS city, count(*) AS places,
-               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM guides g WHERE g.place_id = p.id AND g.state = 'published'))
-                   AS live,
-               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM guides g WHERE g.place_id = p.id
-                                              AND g.state IN ('draft', 'reviewed'))) AS waiting
+               count(*) FILTER (WHERE {state('published')}) AS live,
+               count(*) FILTER (WHERE {state('reviewed')} AND NOT {state('published')}) AS approved,
+               count(*) FILTER (WHERE {state('draft')}) AS in_review,
+               count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM guides g WHERE g.place_id = p.id
+                                                  AND g.state <> 'retired')) AS missing
         FROM places p LEFT JOIN admin_areas ci ON ci.id = coalesce(p.city_id, p.region_id)
         WHERE p.state = 'active' AND EXISTS (SELECT 1 FROM facts f WHERE f.place_id = p.id AND f.state <> 'retired')
         GROUP BY 1 ORDER BY 2 DESC""").fetchall()
